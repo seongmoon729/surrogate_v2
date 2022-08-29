@@ -142,7 +142,6 @@ def read_label_map(path):
     return label_map_dict, categories
 
 
-
 def create_optimizer(optim_name, learning_rate, parameters):
     if optim_name == 'sgd':
         optimizer = optim.SGD(parameters, lr=learning_rate, momentum=0.9)

@@ -19,6 +19,6 @@ services:
       stack: 67108864
     volumes:
       - ./:/surrogate_v2
-      - /data1/:/data/  # for symbolic links.
+      - /data4/:/data/  # for symbolic links.
       - ${HOME}/container_root/:/root/
     tty: true

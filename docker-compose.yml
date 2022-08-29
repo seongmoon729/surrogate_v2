@@ -1,4 +1,4 @@
-# Written by Seongmoon Jeong - 2022.04.29
+# Written by Seongmoon Jeong - 2022.08.22
 
 version: "3.9"
 
@@ -18,8 +18,7 @@ services:
       memlock: -1
       stack: 67108864
     volumes:
-      - ${HOME}/container_root/:/root/
       - ./:/surrogate_v2
-      - ./data/:/data/
-      - /data1/:/data1/  # for symbolic links.
+      - /data1/:/data/  # for symbolic links.
+      - ${HOME}/container_root/:/root/
     tty: true

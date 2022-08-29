@@ -4,11 +4,5 @@ __pycache__/
 
 .ipynb_checkpoints
 
-data/
-
 out/
-
-*.png
-
-*.csv
 

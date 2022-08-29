@@ -71,8 +71,6 @@ def run_codec(input, codec, q, ds=0, tool_path='/surrogate_v2/tools'):
     vvenc_cmd = "vvencapp"
     vvdec_cmd = "vvdecapp"
     vvenc_preset = "medium"
-    # vvenc_cmd = "vvencFFapp"
-    # vvdec_cmd = "vvdecFFapp"
 
     # Make temp directory for processing.
     dst_dir_obj = tempfile.TemporaryDirectory()

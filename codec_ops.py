@@ -54,22 +54,9 @@ def run_codec(input, codec, q, ds=0, tool_path='/surrogate_v2/tools'):
     assert codec in CODEC_LIST
     assert ds in DS_LEVELS, f"Choose one of {DS_LEVELS}."
 
-    # Set path of binary files & check.
-    tool_path = Path(tool_path)
-    bin_path = tool_path / 'bin'
-    ffmpeg_path = bin_path / 'ffmpeg'
-    vtm_path = bin_path / 'EncoderApp_12_0'
-    config_path = tool_path / 'configs'
-    vtm_config_path = config_path / 'VTM' / 'encoder_intra_vtm_12_0.cfg'
-    assert ffmpeg_path.exists()
-    assert vtm_path.exists()
-    assert vtm_config_path.exists()
-
     # Define base commands.
-    ffmpeg_base_cmd = f"{ffmpeg_path} -y -loglevel error"
-    vtm_base_cmd = f"{vtm_path} -c {vtm_config_path}"
-    vvenc_cmd = "vvencapp"
-    vvdec_cmd = "vvdecapp"
+    ffmpeg_base_cmd = f"ffmpeg -y -loglevel error"
+    vtm_base_cmd = f"vtm -c /usr/local/etc/encoder_intra_vtm.cfg"
     vvenc_preset = "medium"
 
     # Make temp directory for processing.
@@ -130,9 +117,9 @@ def run_codec(input, codec, q, ds=0, tool_path='/surrogate_v2/tools'):
                 f" --InternalBitDepth=10 > {log_path}")
 
     # Define VVC command.
-    vvc_cmd = (f"{vvenc_cmd} -i {yuv_path} -o {comp_bin_path} -q {q} -s {dw}x{dh} -r 1"
+    vvc_cmd = (f"vvencapp -i {yuv_path} -o {comp_bin_path} -q {q} -s {dw}x{dh} -r 1"
                f" --internal-bitdepth 10 --preset={vvenc_preset} > {log_path} && "
-               f"{vvdec_cmd} -b {comp_bin_path} -o {recon_yuv_path} -t 1 > {log_path}")
+               f"vvdecapp -b {comp_bin_path} -o {recon_yuv_path} -t 1 > {log_path}")
 
     # Choose codec.
     if codec == 'jpeg':
@@ -148,15 +135,9 @@ def run_codec(input, codec, q, ds=0, tool_path='/surrogate_v2/tools'):
         assert q in VVC_QUALITIES, f"Choose one of {VVC_QUALITIES}, lower is better."
         codec_cmd = vvc_cmd
 
-    # Start processing.
-    # import time
-    # t1 = time.time()
     _run_cmd(down_img2yuv_cmd)  # 1. Down-scale & RGB2YUV.
-    # t2 = time.time(); print('down', t2 - t1)
     _run_cmd(codec_cmd)         # 2. Run codec.
-    # t3 = time.time(); print('codec', t3 - t2)
     _run_cmd(yuv2img_up_cmd)    # 3. YUV2RGB & Up-scale.
-    # t4 = time.time(); print('up', t4 - t3)
 
     # Generate processing results.
     recon_img = Image.open(recon_png_path)

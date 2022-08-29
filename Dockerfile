@@ -54,7 +54,7 @@ RUN pip install detectron2==0.6 -f \
 RUN pip install tensorflow-cpu==2.8.1
 WORKDIR /root
 RUN git clone https://github.com/tensorflow/models.git
-RUN (cd /root/models/research/ && protoc object_detection/protos/*.proto --python_out=.)
+RUN cd /root/models/research/ && protoc object_detection/protos/*.proto --python_out=.
 WORKDIR /root/models/research
 RUN cp object_detection/packages/tf2/setup.py .
 RUN pip install --no-deps .
@@ -64,15 +64,29 @@ RUN python -m pip install \
     parmap scikit-image seaborn ray[default]==2.0.0 compressai fiftyone
 ENV TZ=Asia/Seoul
 
+# Install FFmpeg
+RUN add-apt-repository ppa:savoury1/ffmpeg4
+RUN apt-get update
+RUN apt-get install -y ffmpeg
+
+# Install VTM
+ENV VTM_VERSION=12.0
+WORKDIR /root
+RUN git clone https://vcgit.hhi.fraunhofer.de/jvet/VVCSoftware_VTM.git
+RUN cd VVCSoftware_VTM && git checkout tags/VTM-${VTM_VERSION} && mkdir build && \
+    cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j
+RUN mv /root/VVCSoftware_VTM/bin/EncoderAppStatic /usr/bin/vtm
+RUN mv /root/VVCSoftware_VTM/cfg/encoder_intra_vtm.cfg /usr/local/etc/
+
 # Install VVenC & VVdeC.
 ENV VVC_VERSION=1.4.0
 WORKDIR /root
 RUN git clone https://github.com/fraunhoferhhi/vvenc.git
-RUN (cd vvenc && git checkout tags/v${VVC_VERSION} && make install-release)
+RUN cd vvenc && git checkout tags/v${VVC_VERSION} && make install-release
+RUN mv /root/vvenc/bin/release-static/vvenc* /usr/bin/
 WORKDIR /root
 RUN git clone https://github.com/fraunhoferhhi/vvdec.git
-RUN (cd vvdec && git checkout tags/v${VVC_VERSION} && make install-release)
-RUN mv /root/vvenc/bin/release-static/vvenc* /usr/bin/
+RUN cd vvdec && git checkout tags/v${VVC_VERSION} && make install-release
 RUN mv /root/vvdec/bin/release-static/vvdec* /usr/bin/
 
 # Set working directory.

@@ -194,8 +194,8 @@ def evaluate_for_object_detection(config):
             od_output_df = pd.DataFrame(od_outputs, columns=columns.split(','))
 
             # Fix & filter the image label.
-            od_output_df.LabelName = od_output_df.LabelName.replace(' ', '_', regex=True)
-            od_output_df = od_output_df[od_output_df.LabelName.isin(selected_classes)]
+            od_output_df['LabelName'] = od_output_df['LabelName'].replace(' ', '_', regex=True)
+            od_output_df = od_output_df[od_output_df['LabelName'].isin(selected_classes)]
 
             # Open images challenge evaluation.
             if vision_task == 'detection':
@@ -203,7 +203,6 @@ def evaluate_for_object_detection(config):
                 challenge_evaluator = (
                     object_detection_evaluation.OpenImagesChallengeEvaluator(
                         categories, evaluate_masks=is_instance_segmentation_eval))
-
                 # Ready for evaluation.
                 for image_id, image_groundtruth in all_annotations.groupby('ImageID'):
                     groundtruth_dictionary = oid_utils.build_groundtruth_dictionary(image_groundtruth, class_label_map)
@@ -212,8 +211,7 @@ def evaluate_for_object_detection(config):
                         od_output_df.loc[od_output_df['ImageID'] == image_id], class_label_map)
                     challenge_evaluator.add_single_detected_image_info(image_id, prediction_dictionary)
 
-                # Evaluate.
-                # Class-wise evaluation result is produced.
+                # Evaluate. class-wise evaluation result is produced.
                 metrics = challenge_evaluator.evaluate()
                 mean_map = sum(metrics.values()) / len(metrics.values())
                 mean_bpp = sum(bpps) / len(bpps)

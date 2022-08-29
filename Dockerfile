@@ -1,4 +1,4 @@
-# Written by Seongmoon Jeong - 2022.04.29
+# Written by Seongmoon Jeong - 2022.08.22
 
 FROM nvcr.io/nvidia/cuda:11.1.1-cudnn8-devel-ubuntu18.04
 

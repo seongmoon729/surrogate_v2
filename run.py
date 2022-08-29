@@ -79,7 +79,7 @@ def parse_args():
         "--eval_codec", "-ec", type=str, default='vtm',
         help="Choose codec to use in evaluation.")
     eval_parser.add_argument(
-        "--eval_quality", "-eq", type=str, default='47,42,37',
+        "--eval_quality", "-eq", type=str,
         help="Encoding quality (comma separated). There are fixed list of qualities for each codec.\n"
             f"   * jpeg  (2-31): {','.join(map(str, JPEG_QUALITIES)):>17} <- lower is better\n"
             f"   * webp (1-100): {','.join(map(str, WEBP_QUALITIES)):>17} <- higher is better\n"
@@ -134,6 +134,9 @@ def parse_args():
             qualities = VTM_QUALITIES
         elif args.eval_codec == 'vvc':
             qualities = VVC_QUALITIES
+        if args.eval_quality is None:
+            assert False, f"Please provide '--eval_quality' (-eq), available: {qualities}."
+
         qs = map(int, args.eval_quality.split(','))
         for q in qs:
             assert q in qualities, f"{q} is not in {qualities}."

@@ -68,30 +68,32 @@ class Evaluator:
         if self.vision_task == 'segmentation':
             masks = outputs['instances'].pred_masks.to('cpu').numpy()
 
-        o_lines = []
+        od_outputs = []
         for i, coco_cnt_id in enumerate(classes):
             class_name = self.coco_classes[coco_cnt_id]
-            result = [imageId, class_name, scores[i]] + bboxes[i].tolist()
+            od_output = [imageId, class_name, scores[i]] + bboxes[i].tolist()
             if self.vision_task == 'segmentation':
-                result += [
+                od_output += [
                     masks[i].shape[1],
                     masks[i].shape[0],
                     oid_mask_encoding.encode_binary_mask(masks[i]).decode('ascii')]
-            o_line = ','.join(map(str, result))
-            o_lines.append(o_line)
-        return o_lines, bpp
+            od_outputs.append(od_output)
+        return od_outputs, bpp
 
 
 def evaluate_for_object_detection(config):
     logger = utils.get_logger()
+    logger.info(f"Start evaluation script for '{config.session_path}'.")
     ray.init()
 
     session_path = Path(config.session_path)
     session_path.mkdir(parents=True, exist_ok=True)
-    logger.info(f"Start evaluation script for '{session_path}'.")
+    result_path = session_path / 'result.csv'
     
+    # Parse vision task.
     vision_task, _, _, _ = utils.inspect_session_path(session_path)
 
+    # Generate evaluation settings.
     if ',' in config.eval_downscale:
         eval_downscales = list(map(int, config.eval_downscale.split(',')))
     else:
@@ -101,6 +103,19 @@ def evaluate_for_object_detection(config):
     else:
         eval_qualities = [int(config.eval_quality)]
     eval_settings = list(itertools.product(eval_downscales, eval_qualities))
+
+    # Create or load result dataframe.
+    if result_path.exists():
+        result_df = pd.read_csv(result_path)
+        # Delete already evaluated settings.
+        subset_df = result_df[result_df.task == vision_task]
+        subset_df = subset_df[subset_df.codec == config.eval_codec]
+        evaluated_settings = itertools.product(subset_df.downscale, subset_df.quality)
+        for _setting in evaluated_settings:
+            if _setting in eval_settings:
+                eval_settings.remove(_setting)
+    else:
+        result_df = pd.DataFrame(columns=['task', 'codec', 'downscale', 'quality', 'bpp', 'metric'])
 
     input_files = utils.get_input_files(config.input_list, config.input_dir)
     logger.info(f"Number of total images: {len(input_files)}")
@@ -125,44 +140,20 @@ def evaluate_for_object_detection(config):
     n_p_eval = config.num_parallel_eval
     eval_builder = ray.remote(num_gpus=(n_gpu / n_p_eval))(Evaluator)
     eval_init_args = (session_path, config.session_step, coco_classes)
-    # evaluators = [eval_builder.remote(*eval_init_args) for _ in range(n_p_eval)]
-
-    # Set result/output file names.
-    result_path = session_path / 'result.csv'
-    # TODO. Remove artifacts.
-    coco_output_path = session_path / 'output_coco.csv'
-    oid_output_path = session_path / 'output_oid.csv'
-    oid_output_eval_path = session_path / 'output_oid_eval.csv'
-
-    # Create or load result dataframe.
-    if result_path.exists():
-        result_df = pd.read_csv(result_path)
-
-        # Delete already evaluated settings.
-        subset_df = result_df[result_df.task == vision_task]
-        subset_df = subset_df[subset_df.codec == config.eval_codec]
-        evaluated_settings = itertools.product(subset_df.downscale, subset_df.quality)
-        for _setting in evaluated_settings:
-            if _setting in eval_settings:
-                eval_settings.remove(_setting)
-    else:
-        result_df = pd.DataFrame(columns=['task', 'codec', 'downscale', 'quality', 'bpp', 'metric'])
 
     #TODO. Memory growth issue (~ 174GB).
     logger.info("Start evaluation loop.")
     total = len(input_files) * len(eval_settings)
     with tqdm(total=total, dynamic_ncols=True, smoothing=0.1) as pbar:
         for downscale, quality in eval_settings:
+            # Make/set evaluators and their inputs.
             input_iter = iter(input_files)
-            evaluators = [eval_builder.remote(*eval_init_args) for _ in range(n_p_eval)]
             codec_args = (config.eval_codec, quality, downscale)
-            coco_of = open(coco_output_path, 'w')
-            bpps = []
+            evaluators = [eval_builder.remote(*eval_init_args) for _ in range(n_p_eval)]
+
+            # Set output
+            od_outputs, bpps = [], []
             work_info = dict()
-            if vision_task == 'detection':
-                coco_of.write('ImageID,LabelName,Score,XMin,XMax,YMin,YMax\n')
-            else:
-                coco_of.write('ImageID,LabelName,Score,XMin,XMax,YMin,YMax,ImageWidth,ImageHeight,Mask\n')
             while True:
                 # Put inputs.
                 try:
@@ -180,10 +171,10 @@ def evaluate_for_object_detection(config):
                     done_ids, _ = ray.wait(list(work_info.keys()), timeout=1)
                     if done_ids:
                         for done_id in done_ids:
-                            o_lines, bpp = ray.get(done_id)
+                            # Store outputs.
+                            od_outputs_, bpp = ray.get(done_id)
+                            od_outputs.extend(od_outputs_)
                             bpps.append(bpp)
-                            for o_line in o_lines:
-                                coco_of.write(o_line + '\n')
                             eval = work_info.pop(done_id)
                             if end_flag:
                                 ray.kill(eval)
@@ -194,19 +185,17 @@ def evaluate_for_object_detection(config):
                 # End one loop.
                 if not work_info:
                     break
-            coco_of.close()
 
             # Postprocess: Convert coco to oid.
-            coco_output_data = pd.read_csv(coco_output_path)
-            with open(oid_output_path, 'w') as f:
-                f.write(','.join(coco_output_data.columns) + '\n')
-                for _, row in coco_output_data.iterrows():
-                    coco_id = row['LabelName'].replace(' ', '_')
-                    if coco_id in selected_classes:
-                        oid_id = coco_id
-                        row['LabelName'] = oid_id
-                        o_line = ','.join(map(str,row))
-                        f.write(o_line + '\n')
+            if vision_task == 'detection':
+                columns = 'ImageID,LabelName,Score,XMin,XMax,YMin,YMax'
+            else:
+                columns = 'ImageID,LabelName,Score,XMin,XMax,YMin,YMax,ImageWidth,ImageHeight,Mask'
+            od_output_df = pd.DataFrame(od_outputs, columns=columns.split(','))
+
+            # Fix & filter the image label.
+            od_output_df.LabelName = od_output_df.LabelName.replace(' ', '_', regex=True)
+            od_output_df = od_output_df[od_output_df.LabelName.isin(selected_classes)]
 
             # Open images challenge evaluation.
             if vision_task == 'detection':
@@ -214,19 +203,18 @@ def evaluate_for_object_detection(config):
                 challenge_evaluator = (
                     object_detection_evaluation.OpenImagesChallengeEvaluator(
                         categories, evaluate_masks=is_instance_segmentation_eval))
-                # Load oid result.
-                all_predictions = pd.read_csv(oid_output_path)
+
                 # Ready for evaluation.
                 for image_id, image_groundtruth in all_annotations.groupby('ImageID'):
                     groundtruth_dictionary = oid_utils.build_groundtruth_dictionary(image_groundtruth, class_label_map)
                     challenge_evaluator.add_single_ground_truth_image_info(image_id, groundtruth_dictionary)
                     prediction_dictionary = oid_utils.build_predictions_dictionary(
-                        all_predictions.loc[all_predictions['ImageID'] == image_id], class_label_map)
+                        od_output_df.loc[od_output_df['ImageID'] == image_id], class_label_map)
                     challenge_evaluator.add_single_detected_image_info(image_id, prediction_dictionary)
+
                 # Evaluate.
+                # Class-wise evaluation result is produced.
                 metrics = challenge_evaluator.evaluate()
-                with open(oid_output_eval_path, 'w') as f:
-                    io_utils.write_csv(f, metrics)
                 mean_map = sum(metrics.values()) / len(metrics.values())
                 mean_bpp = sum(bpps) / len(bpps)
             else:

@@ -1,0 +1,71 @@
+from pathlib import Path
+
+import torch
+from detectron2.data import build_detection_train_loader
+
+import utils
+import models
+
+
+def train_for_object_detection(config):
+    logger = utils.get_logger()
+
+    # Set session path (path for artifacts of training).
+    session_path = utils.build_session_path(config)
+    logger.info(f"Start training script for '{session_path}'.")
+
+    # Get detectron2 config data.
+    cfg = utils.get_od_cfg(config.vision_task, config.vision_network)
+
+    # Build end-to-end model.
+    end2end_network = models.EndToEndNetwork(
+        config.surrogate_quality, config.vision_task, od_cfg=cfg)
+
+    # Build optimizer.
+    target_params = (
+        list(end2end_network.filtering_network.filter.parameters())
+        + list(end2end_network.filtering_network.pixel_rate_estimator.parameters()))
+    optimizer = utils.create_optimizer(config.optimizer, config.learning_rate, target_params)
+
+    # Search checkpoint files & resume.
+    output_path = Path('out') / session_path
+    checkpoint = utils.Checkpoint(output_path)
+    last_step = checkpoint.resume(end2end_network.filtering_network, optimizer)
+    if last_step:
+        logger.info(f"Resume training. Last step is {last_step}.")
+    else:
+        logger.info("Start training from the scratch.")
+
+    # Set as training mode & load on GPU.
+    end2end_network.train()
+    end2end_network.cuda()
+    for state in optimizer.state.values():
+        for k, v in state.items():
+            if isinstance(v, torch.Tensor):
+                state[k] = v.cuda()
+
+    # Build data loader.
+    cfg.SOLVER.IMS_PER_BATCH = config.batch_size
+    dataloader = build_detection_train_loader(cfg)
+
+    # Run training loop.
+    logger.info("Start training.")
+    start_step = last_step + 1
+    end_step = config.steps
+    for data, step in zip(dataloader, range(start_step, end_step + 1)):
+        losses = end2end_network(data)
+        loss_rd = losses['r'] + config.lmbda * losses['d']
+        
+        optimizer.zero_grad()
+        loss_rd.backward()
+        optimizer.step()
+
+        if step % 100 == 0:
+            logger.info(f"step: {step:6} | loss_r: {losses['r']:7.4f} | loss_d: {losses['d']:7.4f}")        
+            checkpoint.save(
+                end2end_network.filtering_network,
+                optimizer,
+                step=step,
+                persistent_period=config.checkpoint_period)
+
+

@@ -1,0 +1,25 @@
+# Written by Seongmoon Jeong - 2022.04.29
+
+version: "3.9"
+
+services:
+  main:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ${USER}/surrogate:v2
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    shm_size: 256gb
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    volumes:
+      - ${HOME}/container_root/:/root/
+      - ./:/surrogate_v2
+      - ./data/:/data/
+      - /data1/:/data1/  # for symbolic links.
+    tty: true

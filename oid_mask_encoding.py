@@ -11,21 +11,21 @@ from pycocotools import _mask as coco_mask
 import zlib
 
 def encode_binary_mask(mask):
- # check mask data type and shape
- assert mask.dtype==np.bool, print('mask must be a binary mask')
+    # check mask data type and shape
+    assert mask.dtype==np.bool, print('mask must be a binary mask')
 
- mask = np.squeeze(mask)
- assert len(mask.shape)==2, print('mask must be a 2D tensro') 
+    mask = np.squeeze(mask)
+    assert len(mask.shape)==2, print('mask must be a 2D tensro') 
 
- # prepare data
- mask_to_encode = mask.reshape(mask.shape[0], mask.shape[1], 1)
- mask_to_encode = mask_to_encode.astype(np.uint8)
- mask_to_encode = np.asfortranarray(mask_to_encode)
+    # prepare data
+    mask_to_encode = mask.reshape(mask.shape[0], mask.shape[1], 1)
+    mask_to_encode = mask_to_encode.astype(np.uint8)
+    mask_to_encode = np.asfortranarray(mask_to_encode)
 
- # encode
- encoded_mask = coco_mask.encode(mask_to_encode)[0]["counts"]
+    # encode
+    encoded_mask = coco_mask.encode(mask_to_encode)[0]["counts"]
 
- # compress
- binary_str = zlib.compress(encoded_mask, zlib.Z_BEST_COMPRESSION)
- base64_str = base64.b64encode(binary_str)
- return base64_str
+    # compress
+    binary_str = zlib.compress(encoded_mask, zlib.Z_BEST_COMPRESSION)
+    base64_str = base64.b64encode(binary_str)
+    return base64_str

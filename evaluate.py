@@ -153,8 +153,7 @@ def evaluate_for_object_detection(config):
             evaluators = [eval_builder.remote(*eval_init_args) for _ in range(n_eval)]
             input_iter = iter(input_files)
             codec_args = (config.eval_codec, quality, downscale)
-
-            # Set output
+            # Run evaluators.
             od_outputs, bpps = [], []
             work_info = dict()
             while True:
@@ -169,7 +168,7 @@ def evaluate_for_object_detection(config):
                 except StopIteration:
                     end_flag = True
                 
-                # Get results.
+                # Get detection result & bpp.
                 if (not evaluators) or end_flag:
                     done_ids, _ = ray.wait(list(work_info.keys()), timeout=1)
                     if done_ids:
@@ -185,15 +184,14 @@ def evaluate_for_object_detection(config):
                             else:
                                 evaluators.append(eval)
                             pbar.update(1)
-                # End one loop.
+                # End loop for one setting.
                 if not work_info:
                     break
 
             # Postprocess: Convert coco to oid.
-            if vision_task == 'detection':
-                columns = 'ImageID,LabelName,Score,XMin,XMax,YMin,YMax'
-            else:
-                columns = 'ImageID,LabelName,Score,XMin,XMax,YMin,YMax,ImageWidth,ImageHeight,Mask'
+            columns = ['ImageID', 'LabelName', 'Score', 'XMin', 'XMax', 'YMin', 'YMax']
+            if vision_task == 'segmentation':
+                columns += ['ImageWidth', 'ImageHeight', 'Mask']
             od_output_df = pd.DataFrame(od_outputs, columns=columns.split(','))
 
             # Fix & filter the image label.
@@ -220,16 +218,16 @@ def evaluate_for_object_detection(config):
                 mean_bpp = sum(bpps) / len(bpps)
             else:
                 pass
-            row = {
-                'task': vision_task,
-                'codec': config.eval_codec,
+            result = {
+                'task'     : vision_task,
+                'codec'    : config.eval_codec,
                 'downscale': downscale,
-                'quality': quality,
-                'bpp': mean_bpp,
-                'metric': mean_map,
-                'step': config.session_step,
+                'quality'  : quality,
+                'bpp'      : mean_bpp,
+                'metric'   : mean_map,
+                'step'     : config.session_step,
             }
-            result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
+            result_df = pd.concat([result_df, pd.DataFrame([result])], ignore_index=True)
             result_df.sort_values(
                 by=['task', 'codec', 'downscale', 'bpp'], inplace=True)
             result_df.to_csv(result_path, index=False)

@@ -2,26 +2,8 @@
 
 FROM nvcr.io/nvidia/cuda:11.1.1-cudnn8-devel-ubuntu20.04
 
-###############################################
-# Set versions & path environment variables.
-ENV PYTHON3_VERSION="3.8"
-ENV DETECTRON2_VERSION="0.6"
-ENV VTM_VERSION="12.0"
-ENV VVENC_VERSION="1.5.0"
-
-ENV CONFIG_PATH="/usr/local/etc"
-ENV VTM_CFG_NAME="encoder_intra_vtm.cfg"
-ENV VVENC_ORG_CFG_NAME="randomaccess_medium.cfg"
-ENV VVENC_CFG_NAME="encoder_intra_vvenc.cfg"
-
-ENV VTM_CFG_PATH=${CONFIG_PATH}/${VTM_CFG_NAME}
-ENV VVENC_ORG_CFG_PATH=${CONFIG_PATH}/${VVENC_ORG_CFG_NAME}
-ENV VVENC_CFG_PATH=${CONFIG_PATH}/${VVENC_CFG_NAME}
-
 ENV DEBIAN_FRONTEND noninteractive
 ENV TZ=Asia/Seoul
-###############################################
-
 
 # Temporarily added for issue.
 RUN apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub
@@ -47,12 +29,14 @@ RUN rm /etc/apt/trusted.gpg.d/kitware.gpg
 RUN apt-get install -y cmake
 
 # Install python3 & deps.
+ENV PYTHON3_VERSION="3.8"
 RUN add-apt-repository ppa:deadsnakes/ppa -y
 RUN apt-get install -y \
     python${PYTHON3_VERSION}-dev python3-pip python3-opencv python3-lxml \
     python-is-python3
 
 # Install pytorch & detectron2.
+ENV DETECTRON2_VERSION="0.6"
 COPY install_detectron2.sh /install_detectron2.sh
 RUN ./install_detectron2.sh ${DETECTRON2_VERSION}
 RUN rm /install_detectron2.sh
@@ -75,7 +59,13 @@ RUN add-apt-repository ppa:savoury1/ffmpeg4
 RUN apt-get update
 RUN apt-get install -y ffmpeg
 
+# Set config file directory.
+ENV CONFIG_PATH="/usr/local/etc"
+
 # Install VTM
+ENV VTM_VERSION="12.0"
+ENV VTM_CFG_NAME="encoder_intra_vtm.cfg"
+ENV VTM_CFG_PATH=${CONFIG_PATH}/${VTM_CFG_NAME}
 WORKDIR /root
 RUN git clone https://vcgit.hhi.fraunhofer.de/jvet/VVCSoftware_VTM.git
 RUN cd VVCSoftware_VTM && git checkout tags/VTM-${VTM_VERSION} && mkdir build && \
@@ -84,6 +74,11 @@ RUN mv /root/VVCSoftware_VTM/bin/EncoderAppStatic /usr/bin/vtm
 RUN mv /root/VVCSoftware_VTM/cfg/${VTM_CFG_NAME} ${VTM_CFG_PATH}
 
 # Install VVenC.
+ENV VVENC_VERSION="1.5.0"
+ENV VVENC_ORG_CFG_NAME="randomaccess_medium.cfg"
+ENV VVENC_CFG_NAME="encoder_intra_vvenc.cfg"
+ENV VVENC_ORG_CFG_PATH=${CONFIG_PATH}/${VVENC_ORG_CFG_NAME}
+ENV VVENC_CFG_PATH=${CONFIG_PATH}/${VVENC_CFG_NAME}
 WORKDIR /root
 RUN git clone https://github.com/fraunhoferhhi/vvenc.git
 RUN cd vvenc && git checkout tags/v${VVENC_VERSION} && make install-release

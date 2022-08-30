@@ -1,6 +1,6 @@
 # Written by Seongmoon Jeong - 2022.08.22
 
-FROM nvcr.io/nvidia/cuda:11.1.1-cudnn8-devel-ubuntu18.04
+FROM nvcr.io/nvidia/cuda:11.1.1-cudnn8-devel-ubuntu20.04
 
 # Temporarily added for issue.
 RUN apt-key adv --fetch-keys https://developer.download.nvidia.com/compute/cuda/repos/ubuntu1804/x86_64/3bf863cc.pub
@@ -28,11 +28,12 @@ RUN apt-get install -y kitware-archive-keyring
 RUN rm /etc/apt/trusted.gpg.d/kitware.gpg
 RUN apt-get install -y cmake
 
-# Install python3.7 & deps.
+# Install python3 & deps.
+ENV PYTHON3_VERSION=3.8
+RUN add-apt-repository ppa:deadsnakes/ppa -y
 RUN apt-get install -y \
-    python3.7-dev python3-pip python3-opencv python3-lxml
-RUN ln -sv /usr/bin/python3.7 /usr/bin/python
-RUN python -m pip install -U pip 
+    python${PYTHON3_VERSION}-dev python3-pip python3-opencv python3-lxml \
+    python-is-python3
 
 # Install pytorch & detectron2.
 ENV FORCE_CUDA="1"
@@ -78,17 +79,13 @@ RUN cd VVCSoftware_VTM && git checkout tags/VTM-${VTM_VERSION} && mkdir build &&
 RUN mv /root/VVCSoftware_VTM/bin/EncoderAppStatic /usr/bin/vtm
 RUN mv /root/VVCSoftware_VTM/cfg/encoder_intra_vtm.cfg /usr/local/etc/encoder_intra_vtm.cfg
 
-# Install VVenC & VVdeC.
+# Install VVenC.
 ENV VVC_VERSION=1.4.0
 WORKDIR /root
 RUN git clone https://github.com/fraunhoferhhi/vvenc.git
 RUN cd vvenc && git checkout tags/v${VVC_VERSION} && make install-release
 RUN mv /root/vvenc/bin/release-static/vvencFFapp /usr/bin/vvencFFapp
 RUN mv /root/vvenc/cfg/randomaccess_medium.cfg /usr/local/etc/randomaccess_medium.cfg
-WORKDIR /root
-RUN git clone https://github.com/fraunhoferhhi/vvdec.git
-RUN cd vvdec && git checkout tags/v${VVC_VERSION} && make install-release
-RUN mv /root/vvdec/bin/release-static/vvdecapp /usr/bin/vvdecapp
 
 # Create VVenC config for intra mode.
 COPY create_vvenc_cfg.py /root/create_vvenc_cfg.py

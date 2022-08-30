@@ -1,3 +1,4 @@
+import os
 import math
 import tempfile
 
@@ -11,8 +12,8 @@ import numpy as np
 
 # Define base commands.
 FFMPEG_BASE_CMD = f"ffmpeg -y -loglevel error"
-VTM_BASE_CMD    = f"vtm -c /usr/local/etc/encoder_intra_vtm.cfg"
-VVENC_BASE_CMD  = f"vvencFFapp -c /usr/local/etc/encoder_intra_vvenc.cfg"
+VTM_BASE_CMD    = f"vtm -c {os.environ['VTM_CFG_PATH']}"
+VVENC_BASE_CMD  = f"vvencFFapp -c {os.environ['VVENC_CFG_PATH']}"
 # VVENC_BASE_CMD  = f"vvencFFapp -c /surrogate_v2/vvenc.cfg"
 
 

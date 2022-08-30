@@ -50,7 +50,7 @@ def codec_fn(x, codec, quality, downscale=0):
     x = x.copy()
     x *= 255.                      # Denormalize
     x = x.transpose((1, 2, 0))     # (C, H, W) -> (H, W ,C)
-    x = x.astype('uint8')
+    x = x.round().astype('uint8')
     pil_img = Image.fromarray(x)
     
     pil_img_recon, bpp = run_codec(pil_img, codec, quality, downscale)
@@ -126,20 +126,20 @@ def run_codec(input, codec, q, ds=0):
 
 def _run_ffmpeg_down_scaling(src_path, dst_path, width, height, ds):
     if ds == 0:
-        filter = f"'pad={width}:{height}'"
+        out_opts = f"-vf 'pad={width}:{height}'"
     else:
-        filter = f"'scale={width}:{height}'"
+        out_opts = f"-vf 'scale={width}:{height}'"
 
-    cmd = f"{FFMPEG_BASE_CMD} -i {src_path} -vf {filter} {dst_path}"
+    cmd = f"{FFMPEG_BASE_CMD} -i {src_path} {out_opts} {dst_path}"
     _run_cmd(cmd)
 
 
 def _run_ffmpeg_up_scaling(src_path, dst_path, width, height, ds):
     if ds == 0:
-        filter = f"'crop={width}:{height}:0:0'"
+        out_opts = f"-vf 'crop={width}:{height}:0:0'"
     else:
-        filter = f"'scale={width}:{height}'"
-    cmd = f"{FFMPEG_BASE_CMD} -i {src_path} -vf {filter} {dst_path}"
+        out_opts = f"-vf 'scale={width}:{height}'"
+    cmd = f"{FFMPEG_BASE_CMD} -i {src_path} {out_opts} {dst_path}"
     _run_cmd(cmd)
 
 

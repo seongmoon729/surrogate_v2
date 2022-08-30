@@ -4,6 +4,7 @@ import argparse
 
 
 from codec_ops import (
+    CODEC_LIST,
     DS_LEVELS,
     JPEG_QUALITIES,
     WEBP_QUALITIES,
@@ -134,6 +135,8 @@ def parse_args():
             qualities = VTM_QUALITIES
         elif args.eval_codec == 'vvenc':
             qualities = VVENC_QUALITIES
+        else:
+            raise ValueError(f"'{args.eval_codec}' is wrong codec, available: {CODEC_LIST}")
         if args.eval_quality is None:
             assert False, f"Please provide '--eval_quality' (-eq), for {args.eval_codec}, available: {qualities}."
 

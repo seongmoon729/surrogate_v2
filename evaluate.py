@@ -7,13 +7,12 @@ import cv2
 import pandas as pd
 from tqdm import tqdm
 
-from object_detection.metrics import io_utils
 from object_detection.utils import object_detection_evaluation
 from object_detection.metrics import oid_challenge_evaluation_utils as oid_utils
 
 import utils
 import models
-
+import checkpoint
 import oid_mask_encoding
 
 
@@ -26,17 +25,20 @@ class Evaluator:
 
         session_path = Path(session_path)
         session_path.mkdir(parents=True, exist_ok=True)    
-        (self.vision_task, self.vision_network,
-         surrogate_quality, self.is_saved_session) = utils.inspect_session_path(session_path)
+        (self.vision_task,
+         self.vision_network,
+         surrogate_quality,
+         self.is_saved_session) = utils.inspect_session_path(session_path)
 
         # Build end-to-end network.
         cfg = utils.get_od_cfg(self.vision_task, self.vision_network)
-        self.end2end_network = models.EndToEndNetwork(surrogate_quality, self.vision_task, od_cfg=cfg)
+        self.end2end_network = models.EndToEndNetwork(
+            surrogate_quality, self.vision_task, od_cfg=cfg)
 
         # Restore weights.
         if self.is_saved_session:
-            checkpoint = utils.Checkpoint(session_path)
-            checkpoint.load(self.end2end_network.filtering_network, step=session_step)
+            ckpt = checkpoint.Checkpoint(session_path)
+            ckpt.load(self.end2end_network.filtering_network, step=session_step)
 
         # Set evaluation mode & load on GPU.
         self.end2end_network.eval()
@@ -115,7 +117,8 @@ def evaluate_for_object_detection(config):
             if _setting in eval_settings:
                 eval_settings.remove(_setting)
     else:
-        result_df = pd.DataFrame(columns=['task', 'codec', 'downscale', 'quality', 'bpp', 'metric'])
+        result_df = pd.DataFrame(
+            columns=['task', 'codec', 'downscale', 'quality', 'bpp', 'metric', 'step'])
 
     input_files = utils.get_input_files(config.input_list, config.input_dir)
     logger.info(f"Number of total images: {len(input_files)}")
@@ -147,9 +150,9 @@ def evaluate_for_object_detection(config):
     with tqdm(total=total, dynamic_ncols=True, smoothing=0.1) as pbar:
         for downscale, quality in eval_settings:
             # Make/set evaluators and their inputs.
+            evaluators = [eval_builder.remote(*eval_init_args) for _ in range(n_p_eval)]
             input_iter = iter(input_files)
             codec_args = (config.eval_codec, quality, downscale)
-            evaluators = [eval_builder.remote(*eval_init_args) for _ in range(n_p_eval)]
 
             # Set output
             od_outputs, bpps = [], []
@@ -224,9 +227,11 @@ def evaluate_for_object_detection(config):
                 'quality': quality,
                 'bpp': mean_bpp,
                 'metric': mean_map,
+                'step': config.session_step,
             }
             result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
-            result_df.sort_values(by=['task', 'codec', 'downscale', 'quality'], inplace=True)
+            result_df.sort_values(
+                by=['task', 'codec', 'downscale', 'quality', 'step'], inplace=True)
             result_df.to_csv(result_path, index=False)
 
 

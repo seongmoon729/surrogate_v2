@@ -73,8 +73,8 @@ def parse_args():
              "   ex1) 'out/detection/faster_rcnn_X_101_32x8d_FPN_3x/base'\n"
              "   ex2) 'out/detection/faster_rcnn_X_101_32x8d_FPN_3x/q1_ld1.0/bs2_adam_lr1e-05'")
     eval_parser.add_argument(
-        "--session_step", "-ss", type=int, default=-1,
-        help="Checkpoint step for saved session (-1 is latest step).")
+        "--session_step", "-ss", type=int, default=0,
+        help="Checkpoint step for saved session (0 is dummy for baseline).")
     eval_parser.add_argument(
         "--eval_codec", "-ec", type=str, default='vtm',
         help="Choose codec to use in evaluation.")
@@ -118,7 +118,7 @@ def parse_args():
         default='data/open-images-v6-etri/validation/',
         help="Directory path for inputs.")
     eval_parser.add_argument(
-        "--num_parallel_eval", "-npe", type=int, default=4,
+        "--num_parallel_eval", "-npe", type=int, default=7,
         help="Number of parallel evaluators.")
 
     args = parser.parse_args()
@@ -135,7 +135,7 @@ def parse_args():
         elif args.eval_codec == 'vvc':
             qualities = VVC_QUALITIES
         if args.eval_quality is None:
-            assert False, f"Please provide '--eval_quality' (-eq), available: {qualities}."
+            assert False, f"Please provide '--eval_quality' (-eq), for {args.eval_codec}, available: {qualities}."
 
         qs = map(int, args.eval_quality.split(','))
         for q in qs:

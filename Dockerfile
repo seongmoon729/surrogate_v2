@@ -80,7 +80,7 @@ RUN mv /root/VVCSoftware_VTM/bin/EncoderAppStatic /usr/bin/vtm
 RUN mv /root/VVCSoftware_VTM/cfg/encoder_intra_vtm.cfg /usr/local/etc/encoder_intra_vtm.cfg
 
 # Install VVenC.
-ENV VVC_VERSION=1.4.0
+ENV VVC_VERSION=1.5.0
 WORKDIR /root
 RUN git clone https://github.com/fraunhoferhhi/vvenc.git
 RUN cd vvenc && git checkout tags/v${VVC_VERSION} && make install-release

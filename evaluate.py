@@ -192,7 +192,7 @@ def evaluate_for_object_detection(config):
             columns = ['ImageID', 'LabelName', 'Score', 'XMin', 'XMax', 'YMin', 'YMax']
             if vision_task == 'segmentation':
                 columns += ['ImageWidth', 'ImageHeight', 'Mask']
-            od_output_df = pd.DataFrame(od_outputs, columns=columns.split(','))
+            od_output_df = pd.DataFrame(od_outputs, columns=columns)
 
             # Fix & filter the image label.
             od_output_df['LabelName'] = od_output_df['LabelName'].replace(' ', '_', regex=True)

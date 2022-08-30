@@ -76,18 +76,28 @@ RUN git clone https://vcgit.hhi.fraunhofer.de/jvet/VVCSoftware_VTM.git
 RUN cd VVCSoftware_VTM && git checkout tags/VTM-${VTM_VERSION} && mkdir build && \
     cd build && cmake .. -DCMAKE_BUILD_TYPE=Release && make -j
 RUN mv /root/VVCSoftware_VTM/bin/EncoderAppStatic /usr/bin/vtm
-RUN mv /root/VVCSoftware_VTM/cfg/encoder_intra_vtm.cfg /usr/local/etc/
+RUN mv /root/VVCSoftware_VTM/cfg/encoder_intra_vtm.cfg /usr/local/etc/encoder_intra_vtm.cfg
 
 # Install VVenC & VVdeC.
 ENV VVC_VERSION=1.4.0
 WORKDIR /root
 RUN git clone https://github.com/fraunhoferhhi/vvenc.git
 RUN cd vvenc && git checkout tags/v${VVC_VERSION} && make install-release
-RUN mv /root/vvenc/bin/release-static/vvenc* /usr/bin/
+RUN mv /root/vvenc/bin/release-static/vvencFFapp /usr/bin/vvencFFapp
+RUN mv /root/vvenc/cfg/randomaccess_medium.cfg /usr/local/etc/randomaccess_medium.cfg
 WORKDIR /root
 RUN git clone https://github.com/fraunhoferhhi/vvdec.git
 RUN cd vvdec && git checkout tags/v${VVC_VERSION} && make install-release
-RUN mv /root/vvdec/bin/release-static/vvdec* /usr/bin/
+RUN mv /root/vvdec/bin/release-static/vvdecapp /usr/bin/vvdecapp
+
+# Create VVenC config for intra mode.
+COPY create_vvenc_cfg.py /root/create_vvenc_cfg.py
+WORKDIR /usr/local/etc/
+RUN python /root/create_vvenc_cfg.py \
+    randomaccess_medium.cfg encoder_intra_vtm.cfg encoder_intra_vvenc.cfg
+
+# Due to torch tensorboard issue.
+RUN pip install setuptools==59.5.0
 
 # Set working directory.
 WORKDIR /surrogate_v2

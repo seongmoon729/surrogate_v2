@@ -8,20 +8,20 @@ from PIL import Image
 import ray
 import numpy as np
 
+
 # Define base commands.
 FFMPEG_BASE_CMD = f"ffmpeg -y -loglevel error"
-VTM_BASE_CMD = f"vtm -c /usr/local/etc/encoder_intra_vtm.cfg"
-# VVENC_BASE_CMD = f"vvencFFapp -c /usr/local/etc/randomaccess_medium.cfg"
-VVENC_BASE_CMD = f"vvencFFapp -c /usr/local/etc/encoder_intra_vvenc.cfg"
-VVDEC_BASE_CMD = f"vvdecapp"
+VTM_BASE_CMD    = f"vtm -c /usr/local/etc/encoder_intra_vtm.cfg"
+VVENC_BASE_CMD  = f"vvencFFapp -c /usr/local/etc/encoder_intra_vvenc.cfg"
+# VVENC_BASE_CMD  = f"vvencFFapp -c /surrogate_v2/vvenc.cfg"
 
 
 DS_LEVELS = [0, 1, 2, 3]
-CODEC_LIST = ['jpeg', 'webp', 'vtm', 'vvc']
-JPEG_QUALITIES = [31, 11, 5, 2]
-WEBP_QUALITIES = [1, 18, 53, 83, 95]
-VTM_QUALITIES  = [47, 42, 37, 32, 27, 22]
-VVC_QUALITIES  = [50, 45, 40, 35, 30, 25]
+CODEC_LIST = ['jpeg', 'webp', 'vtm', 'vvenc']
+JPEG_QUALITIES  = [31, 11, 5, 2]
+WEBP_QUALITIES  = [1, 18, 53, 83, 95]
+VTM_QUALITIES   = [47, 42, 37, 32, 27, 22]
+VVENC_QUALITIES = [50, 45, 40, 35, 30, 25]
 
 
 @ray.remote
@@ -45,7 +45,7 @@ def codec_fn(x, codec, quality, downscale=0):
     elif codec == 'vtm':
         assert quality in VTM_QUALITIES, f"Choose one of {VTM_QUALITIES}, lower is better."
     elif codec == 'vvc':
-        assert quality in VVC_QUALITIES, f"Choose one of {VVC_QUALITIES}, lower is better."
+        assert quality in VVENC_QUALITIES, f"Choose one of {VVENC_QUALITIES}, lower is better."
 
     x = x.copy()
     x *= 255.                      # Denormalize
@@ -66,7 +66,6 @@ def codec_fn(x, codec, quality, downscale=0):
 
 
 def run_codec(input, codec, q, ds=0):
-    assert codec in CODEC_LIST
     assert ds in DS_LEVELS, f"Choose one of {DS_LEVELS}."
 
     # Make temp directory for processing.
@@ -109,8 +108,10 @@ def run_codec(input, codec, q, ds=0):
         _run_ffmpeg_webp(tmp_yuv_path, bin_path, recon_yuv_path, dw, dh, q)
     elif codec == 'vtm':
         _run_vtm(tmp_yuv_path, bin_path, recon_yuv_path, dw, dh, q, log_path)
-    elif codec == 'vvc':
-        _run_vvc(tmp_yuv_path, bin_path, recon_yuv_path, dw, dh, q, log_path)
+    elif codec == 'vvenc':
+        _run_vvenc(tmp_yuv_path, bin_path, recon_yuv_path, dw, dh, q, log_path)
+    else:
+        raise ValueError(f"'{codec}' is wrong codec, available: {CODEC_LIST}.")
     # 4. YUV to Image
     _run_ffmpeg_yuv2img(recon_yuv_path, tmp_png_path, dw, dh)
     # 5. Upscaling/Cropping
@@ -172,17 +173,16 @@ def _run_ffmpeg_webp(src_path, bin_path, recon_path, width, height, quality):
 
 
 def _run_vtm(src_path, bin_path, recon_path, width, height, quality, log_path):
-    cmd = (f"{VTM_BASE_CMD} -i {src_path} -o {recon_path} -b {bin_path}"
+    cmd = (f"{VTM_BASE_CMD} -i {src_path} -b {bin_path} -o {recon_path}"
            f" --ConformanceWindowMode=1 -q {quality} -wdt {width} -hgt {height}"
            f" -f 1 -fr 1 --InternalBitDepth=10 > {log_path}")
     _run_cmd(cmd)
 
 
-def _run_vvc(src_path, bin_path, recon_path, width, height, quality, log_path):
-    cmd = (f"{VVENC_BASE_CMD} --InputFile {src_path} -b {bin_path}"
-           f" --ConformanceWindowMode=1 --QP {quality} -s {width}x{height}"
-           f" -f 1 -fr 1 --InternalBitDepth=10 --threads=4 > {log_path} && "
-           f"{VVDEC_BASE_CMD} -b {bin_path} -o {recon_path} > {log_path}")
+def _run_vvenc(src_path, bin_path, recon_path, width, height, quality, log_path):
+    cmd = (f"{VVENC_BASE_CMD} -i {src_path} -b {bin_path} -o {recon_path}"
+           f" --ConformanceWindowMode=1 -q {quality} -s {width}x{height}"
+           f" -f 1 -fr 1 --InternalBitDepth=10 --threads=4")
     _run_cmd(cmd)
 
 

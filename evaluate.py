@@ -140,8 +140,8 @@ def evaluate_for_object_detection(config):
 
     # Create evaluators.
     n_gpu = len(config.gpu.split(',')) if ',' in config.gpu else 1
-    n_p_eval = config.num_parallel_eval
-    eval_builder = ray.remote(num_gpus=(n_gpu / n_p_eval))(Evaluator)
+    n_eval = config.num_parallel_eval_per_gpu * n_gpu
+    eval_builder = ray.remote(num_gpus=(1 / config.num_parallel_eval_per_gpu))(Evaluator)
     eval_init_args = (session_path, config.session_step, coco_classes)
 
     #TODO. Memory growth issue (~ 174GB).
@@ -150,7 +150,7 @@ def evaluate_for_object_detection(config):
     with tqdm(total=total, dynamic_ncols=True, smoothing=0.1) as pbar:
         for downscale, quality in eval_settings:
             # Make/set evaluators and their inputs.
-            evaluators = [eval_builder.remote(*eval_init_args) for _ in range(n_p_eval)]
+            evaluators = [eval_builder.remote(*eval_init_args) for _ in range(n_eval)]
             input_iter = iter(input_files)
             codec_args = (config.eval_codec, quality, downscale)
 
@@ -231,7 +231,7 @@ def evaluate_for_object_detection(config):
             }
             result_df = pd.concat([result_df, pd.DataFrame([row])], ignore_index=True)
             result_df.sort_values(
-                by=['task', 'codec', 'downscale', 'quality', 'step'], inplace=True)
+                by=['task', 'codec', 'downscale', 'bpp'], inplace=True)
             result_df.to_csv(result_path, index=False)
 
 

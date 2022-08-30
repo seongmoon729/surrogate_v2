@@ -8,7 +8,7 @@ from codec_ops import (
     JPEG_QUALITIES,
     WEBP_QUALITIES,
     VTM_QUALITIES,
-    VVC_QUALITIES,
+    VVENC_QUALITIES,
 )
 
 
@@ -84,7 +84,7 @@ def parse_args():
             f"   * jpeg  (2-31): {','.join(map(str, JPEG_QUALITIES)):>17} <- lower is better\n"
             f"   * webp (1-100): {','.join(map(str, WEBP_QUALITIES)):>17} <- higher is better\n"
             f"   * vtm   (0-63): {','.join(map(str, VTM_QUALITIES)):>17} <- lower is better\n"
-            f"   * vvc   (0-63): {','.join(map(str, VVC_QUALITIES)):>17} <- lower is better\n")
+            f"   * vvenc (0-63): {','.join(map(str, VVENC_QUALITIES)):>17} <- lower is better\n")
     eval_parser.add_argument(
         "--eval_downscale", "-ed", type=str, default='0',
         help="Image downscale level before the encoding (comma separated).\n"
@@ -118,8 +118,8 @@ def parse_args():
         default='data/open-images-v6-etri/validation/',
         help="Directory path for inputs.")
     eval_parser.add_argument(
-        "--num_parallel_eval", "-npe", type=int, default=7,
-        help="Number of parallel evaluators.")
+        "--num_parallel_eval_per_gpu", "-npepg", type=int, default=11,
+        help="Number of parallel evaluators per gpu.")
 
     args = parser.parse_args()
     if args.command is None:
@@ -132,8 +132,8 @@ def parse_args():
             qualities = WEBP_QUALITIES
         elif args.eval_codec == 'vtm':
             qualities = VTM_QUALITIES
-        elif args.eval_codec == 'vvc':
-            qualities = VVC_QUALITIES
+        elif args.eval_codec == 'vvenc':
+            qualities = VVENC_QUALITIES
         if args.eval_quality is None:
             assert False, f"Please provide '--eval_quality' (-eq), for {args.eval_codec}, available: {qualities}."
 

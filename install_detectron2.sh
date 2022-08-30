@@ -4,11 +4,11 @@ TORCH_CUDA_ARCH_LIST="Kepler;Kepler+Tesla;Maxwell;Maxwell+Tegra;Pascal;Volta;Tur
 TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}"
 
 if   [ ${DETECTRON2_VERSION} = "0.6" ]; then
-    export TORCH_VERSION="1.10"
-    export TORCHVISION_VERSION="0.11.0"
+    TORCH_VERSION="1.10"
+    TORCHVISION_VERSION="0.11.0"
 elif [ ${DETECTRON2_VERSION} = "0.5" ]; then
-    export TORCH_VERSION="1.9"
-    export TORCHVISION_VERSION="0.10.0"
+    TORCH_VERSION="1.9"
+    TORCHVISION_VERSION="0.10.0"
 fi
 
 pip install torch==${TORCH_VERSION}+cu111 \

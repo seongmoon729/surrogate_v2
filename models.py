@@ -92,48 +92,80 @@ class EndToEndNetwork(nn.Module):
             if self.vision_task == 'classification':
                 pass
             else:
-                original_image = original_image.astype('float32')
-                if self.input_format == 'BGR':  # BGR -> RGB.
+                # If image format is 'BGR', convert to 'RGB'.
+                if self.input_format == 'BGR':
                     original_image = original_image[:, :, ::-1]
+                
+                # Convert dtype to 'float32' & normalize to [0, 1].
+                original_image = original_image.astype('float32') / 255.
 
-                height, width = original_image.shape[:2]
-                image = self.inference_aug.get_transform(original_image).apply_image(original_image)
-                image = torch.as_tensor(image.astype('float32').transpose(2, 0, 1), device=self.device)
+                # Convert (H, W, C) format to (C, H, W),
+                # which is canonical input format of torch models.
+                original_image = original_image.transpose(2, 0, 1)
 
-                # Filter.
-                image = image[None, ...]
-                image, (h, w) = self.filtering_network.preprocess(image)
+                # Convert to torch tensor.
+                original_image = torch.as_tensor(original_image, device=self.device)
+
+                # 1. Apply filtering or not.
                 if filtering:
-                    filtered_image = self.filtering_network(image / 255.)
-                else:
-                    filtered_image = image / 255.
-
-                # Encode & Decode
-                if codec:
+                    padded_image, (h, w) = self.filtering_network.preprocess(original_image)
+                    filtered_image = self.filtering_network(padded_image[None, ...])[0]
                     filtered_image = self.filtering_network.postprocess(filtered_image, (h, w))
-                    filtered_image = filtered_image[0].detach().cpu()
+                else:
+                    filtered_image = original_image
+
+                # Convert torch tensor to numpy array.
+                filtered_image = filtered_image.detach().cpu().numpy()
+
+                # 2. Apply codec.
+                if codec:  # a. conventional codec.
                     reconstructed_image, bpp = ray.get(codec_ops.ray_codec_fn.remote(
-                        filtered_image.numpy(),
+                        filtered_image,
                         codec=codec,
                         quality=quality,
                         downscale=downscale))
-                    reconstructed_image = torch.as_tensor(reconstructed_image, device=self.device)
-                else:
-                    codec_out = self.surrogate_network(filtered_image)
-                    filtered_image = self.filtering_network.postprocess(filtered_image[0].detach().cpu(), (h, w))
-                    reconstructed_image = self.filtering_network.postprocess(codec_out['x_hat'][0], (h, w))
-                    bpp = self.compute_bpp(codec_out).item()
+                else:      # b. surrogate codec.
+                    filtered_image_ = torch.as_tensor(filtered_image, device=self.device)
+                    filtered_image_, (h, w) = self.filtering_network.preprocess(filtered_image_)
+                    codec_out = self.surrogate_network(filtered_image_[None, ...])
+                    reconstructed_image, bpp = (
+                        self.filtering_network.postprocess(codec_out['x_hat'][0]),
+                        self.compute_bpp(codec_out).item())
+                    # Unpad.
+                    reconstructed_image = self.filtering_network.postprocess(reconstructed_image, (h, w))
+                    reconstructed_image = reconstructed_image.detach().cpu().numpy()
+
+                # Convert reconstructed image format to (H, W, C) & denormalize.
+                od_input_image = reconstructed_image.transpose(1, 2, 0) * 255.
+
+                # Convert RGB to BGR.
+                od_input_image = od_input_image[:, :, ::-1]
+
+                # Convert dtype to 'uint8'
+                od_input_image = od_input_image.round().astype('uint8')
+
+                # Store original size.
+                height, width = od_input_image.shape[:2]
+
+                # Augment reconstructed image for detection network.
+                od_input_image = (self.inference_aug.get_transform(od_input_image)
+                                      .apply_image(od_input_image))
+
+                # Convert numpy array to torch tensor & change format to (C, H, W)
+                od_input_image = torch.as_tensor(
+                    od_input_image.astype('float32').transpose(2, 0, 1), device=self.device)
 
                 # Detector takes 'BGR' format image of range [0, 255].
-                vision_inputs = {'image': reconstructed_image[[2, 1, 0], :, :] * 255., 'height': height, 'width': width}
+                vision_inputs = {'image': od_input_image, 'height': height, 'width': width}
                 vision_results = self.vision_network([vision_inputs])[0]
         
         results.update(vision_results)
         results.update({'bpp': bpp})
         results.update({
             'image': {
-                'filtered': filtered_image.cpu(),
-                'reconstructed': reconstructed_image.cpu(),
+                # Change returned numpy array format to (H, W, C).
+                'filtered': filtered_image.transpose(1, 2, 0),
+                'reconstructed': reconstructed_image.transpose(1, 2, 0),
             }
         })
         return results

@@ -8,13 +8,20 @@ from PIL import Image
 import ray
 import numpy as np
 
+# Define base commands.
+FFMPEG_BASE_CMD = f"ffmpeg -y -loglevel error"
+VTM_BASE_CMD = f"vtm -c /usr/local/etc/encoder_intra_vtm.cfg"
+# VVENC_BASE_CMD = f"vvencFFapp -c /usr/local/etc/randomaccess_medium.cfg"
+VVENC_BASE_CMD = f"vvencFFapp -c /usr/local/etc/encoder_intra_vvenc.cfg"
+VVDEC_BASE_CMD = f"vvdecapp"
+
 
 DS_LEVELS = [0, 1, 2, 3]
 CODEC_LIST = ['jpeg', 'webp', 'vtm', 'vvc']
 JPEG_QUALITIES = [31, 11, 5, 2]
 WEBP_QUALITIES = [1, 18, 53, 83, 95]
 VTM_QUALITIES  = [47, 42, 37, 32, 27, 22]
-VVC_QUALITIES  = [54, 49, 44, 38, 33, 28]
+VVC_QUALITIES  = [50, 45, 40, 35, 30, 25]
 
 
 @ray.remote
@@ -31,6 +38,14 @@ def codec_fn(x, codec, quality, downscale=0):
             downscale: a parameter to control downscaling level
     """
     assert codec in CODEC_LIST
+    if codec == 'jpeg':
+        assert quality in JPEG_QUALITIES, f"Choose one of {JPEG_QUALITIES}, lower is better."
+    elif codec == 'webp':
+        assert quality in WEBP_QUALITIES, f"Choose one of {WEBP_QUALITIES}, higher is better."
+    elif codec == 'vtm':
+        assert quality in VTM_QUALITIES, f"Choose one of {VTM_QUALITIES}, lower is better."
+    elif codec == 'vvc':
+        assert quality in VVC_QUALITIES, f"Choose one of {VVC_QUALITIES}, lower is better."
 
     x = x.copy()
     x *= 255.                      # Denormalize
@@ -50,26 +65,13 @@ def codec_fn(x, codec, quality, downscale=0):
     return x, bpp
 
 
-def run_codec(input, codec, q, ds=0, tool_path='/surrogate_v2/tools'):
+def run_codec(input, codec, q, ds=0):
     assert codec in CODEC_LIST
     assert ds in DS_LEVELS, f"Choose one of {DS_LEVELS}."
-
-    # Define base commands.
-    ffmpeg_base_cmd = f"ffmpeg -y -loglevel error"
-    vtm_base_cmd = f"vtm -c /usr/local/etc/encoder_intra_vtm.cfg"
-    vvenc_preset = "medium"
 
     # Make temp directory for processing.
     dst_dir_obj = tempfile.TemporaryDirectory()
     dst_dir = Path(dst_dir_obj.name)
-
-    # Define intermediate file names.
-    file_name = 'img'
-    yuv_path = dst_dir / (file_name + '.yuv')
-    recon_yuv_path = dst_dir / (file_name + '_recon.yuv')
-    comp_bin_path = dst_dir / (file_name + '_comp.bin')
-    log_path = dst_dir / (file_name + '.log')
-    recon_png_path = dst_dir / (file_name + '_recon.png')
 
     if isinstance(input, str):
         src_img_path = input
@@ -80,6 +82,15 @@ def run_codec(input, codec, q, ds=0, tool_path='/surrogate_v2/tools'):
         src_img_path = dst_dir / 'raw.png'
         pil_img.save(src_img_path)
 
+    # Define intermediate file names.
+    file_name = 'img'
+    tmp_png_path    = dst_dir / (file_name + '.png')
+    tmp_yuv_path    = dst_dir / (file_name + '.yuv')
+    recon_yuv_path  = dst_dir / (file_name + '_recon.yuv')
+    bin_path        = dst_dir / (file_name + '_comp.bin')
+    log_path        = dst_dir / (file_name + '.log')
+    recon_png_path  = dst_dir / (file_name + '_recon.png')
+
     # Compute down-scaled or padded size.
     w, h = pil_img.size
     if ds == 0:
@@ -87,63 +98,92 @@ def run_codec(input, codec, q, ds=0, tool_path='/surrogate_v2/tools'):
     else:
         dw, dh = map(lambda x: math.ceil(x * (4 - ds) / 8) * 2, [w, h])
 
-    # Define (down/up scaling) + (RGB <-> YUV conversion) commands.
-    if ds == 0:
-        down_img2yuv_cmd = (f"{ffmpeg_base_cmd} -i {src_img_path} -vf 'pad={dw}:{dh}'"
-                            f" -f rawvideo -pix_fmt yuv420p -dst_range 1 {yuv_path}")
-        yuv2img_up_cmd   = (f"{ffmpeg_base_cmd} -f rawvideo -pix_fmt yuv420p10le -s {dw}x{dh} -src_range 1"
-                            f" -i {recon_yuv_path} -frames 1 -pix_fmt rgb24"
-                            f" -vf 'crop={w}:{h}:0:0' {recon_png_path}")
-    else:
-        down_img2yuv_cmd = (f"{ffmpeg_base_cmd} -i {src_img_path} -vf 'scale={dw}:{dh}'"
-                            f" -f rawvideo -pix_fmt yuv420p -dst_range 1 {yuv_path}")
-        yuv2img_up_cmd   = (f"{ffmpeg_base_cmd} -f rawvideo -pix_fmt yuv420p10le -s {dw}x{dh} -src_range 1"
-                            f" -i {recon_yuv_path} -frames 1 -pix_fmt rgb24"
-                            f" -vf 'scale={w}:{h}' {recon_png_path}")
-
-    # Define JPEG command.
-    jpeg_cmd = (f"{ffmpeg_base_cmd} -f rawvideo -s {dw}x{dh} -pix_fmt yuv420p -i {yuv_path}"
-                f" -q:v {q} -f mjpeg {comp_bin_path}" " && " 
-                f"{ffmpeg_base_cmd} -i {comp_bin_path} -pix_fmt yuv420p10le {recon_yuv_path}")
-
-    # Define WebP command.
-    webp_cmd = (f"{ffmpeg_base_cmd} -f rawvideo -s {dw}x{dh} -pix_fmt yuv420p -i {yuv_path}"
-                f" -q:v {q} -f webp {comp_bin_path}" " && "
-                f"{ffmpeg_base_cmd} -i {comp_bin_path} -pix_fmt yuv420p10le {recon_yuv_path}")
-
-    # Define VTM command.
-    vtm_cmd  = (f"{vtm_base_cmd} -i {yuv_path} -o {recon_yuv_path} -b {comp_bin_path}"
-                f" -q {q} --ConformanceWindowMode=1 -wdt {dw} -hgt {dh} -f 1 -fr 1"
-                f" --InternalBitDepth=10 > {log_path}")
-
-    # Define VVC command.
-    vvc_cmd = (f"vvencapp -i {yuv_path} -o {comp_bin_path} -q {q} -s {dw}x{dh} -r 1"
-               f" --internal-bitdepth 10 --preset={vvenc_preset} > {log_path} && "
-               f"vvdecapp -b {comp_bin_path} -o {recon_yuv_path} -t 1 > {log_path}")
-
-    # Choose codec.
+    # 1. Downscaling/Padding.
+    _run_ffmpeg_down_scaling(src_img_path, tmp_png_path, dw, dh, ds)
+    # 2. Image to YUV.
+    _run_ffmpeg_img2yuv(tmp_png_path, tmp_yuv_path)
+    # 3. Codec.
     if codec == 'jpeg':
-        assert q in JPEG_QUALITIES, f"Choose one of {JPEG_QUALITIES}, lower is better."
-        codec_cmd = jpeg_cmd
+        _run_ffmpeg_jpeg(tmp_yuv_path, bin_path, recon_yuv_path, dw, dh, q)
     elif codec == 'webp':
-        assert q in WEBP_QUALITIES, f"Choose one of {WEBP_QUALITIES}, higher is better."
-        codec_cmd = webp_cmd
+        _run_ffmpeg_webp(tmp_yuv_path, bin_path, recon_yuv_path, dw, dh, q)
     elif codec == 'vtm':
-        assert q in VTM_QUALITIES, f"Choose one of {VTM_QUALITIES}, lower is better."
-        codec_cmd = vtm_cmd
+        _run_vtm(tmp_yuv_path, bin_path, recon_yuv_path, dw, dh, q, log_path)
     elif codec == 'vvc':
-        assert q in VVC_QUALITIES, f"Choose one of {VVC_QUALITIES}, lower is better."
-        codec_cmd = vvc_cmd
-
-    _run_cmd(down_img2yuv_cmd)  # 1. Down-scale & RGB2YUV.
-    _run_cmd(codec_cmd)         # 2. Run codec.
-    _run_cmd(yuv2img_up_cmd)    # 3. YUV2RGB & Up-scale.
+        _run_vvc(tmp_yuv_path, bin_path, recon_yuv_path, dw, dh, q, log_path)
+    # 4. YUV to Image
+    _run_ffmpeg_yuv2img(recon_yuv_path, tmp_png_path, dw, dh)
+    # 5. Upscaling/Cropping
+    _run_ffmpeg_up_scaling(tmp_png_path, recon_png_path, w, h, ds)
 
     # Generate processing results.
     recon_img = Image.open(recon_png_path)
-    bytes = comp_bin_path.stat().st_size
+    bytes = bin_path.stat().st_size
     bpp = bytes * 8 / (h * w)
     return recon_img, bpp
+
+
+def _run_ffmpeg_down_scaling(src_path, dst_path, width, height, ds):
+    if ds == 0:
+        filter = f"'pad={width}:{height}'"
+    else:
+        filter = f"'scale={width}:{height}'"
+
+    cmd = f"{FFMPEG_BASE_CMD} -i {src_path} -vf {filter} {dst_path}"
+    _run_cmd(cmd)
+
+
+def _run_ffmpeg_up_scaling(src_path, dst_path, width, height, ds):
+    if ds == 0:
+        filter = f"'crop={width}:{height}:0:0'"
+    else:
+        filter = f"'scale={width}:{height}'"
+    cmd = f"{FFMPEG_BASE_CMD} -i {src_path} -vf {filter} {dst_path}"
+    _run_cmd(cmd)
+
+
+def _run_ffmpeg_img2yuv(src_path, dst_path):
+    out_opts = "-f rawvideo -pix_fmt yuv420p -dst_range 1"
+    cmd = f"{FFMPEG_BASE_CMD} -i {src_path} {out_opts} {dst_path}"
+    _run_cmd(cmd)
+
+
+def _run_ffmpeg_yuv2img(src_path, dst_path, width, height):
+    in_opts = f"-f rawvideo -pix_fmt yuv420p10le -s {width}x{height} -src_range 1"
+    out_opts = "-frames 1 -pix_fmt rgb24"
+    cmd = f"{FFMPEG_BASE_CMD} {in_opts} -i {src_path} {out_opts} {dst_path}"
+    _run_cmd(cmd)
+
+
+def _run_ffmpeg_jpeg(src_path, bin_path, recon_path, width, height, quality):
+    in_opts  = f"-f rawvideo -s {width}x{height} -pix_fmt yuv420p"
+    out_opts = f"-q:v {quality} -f mjpeg"
+    cmd = (f"{FFMPEG_BASE_CMD} {in_opts} -i {src_path} {out_opts} {bin_path} && "
+           f"{FFMPEG_BASE_CMD} -i {bin_path} -pix_fmt yuv420p10le {recon_path}")
+    _run_cmd(cmd)
+
+
+def _run_ffmpeg_webp(src_path, bin_path, recon_path, width, height, quality):
+    in_opts  = f"-f rawvideo -s {width}x{height} -pix_fmt yuv420p"
+    out_opts = f"-q:v {quality} -f webp"
+    cmd = (f"{FFMPEG_BASE_CMD} {in_opts} -i {src_path} {out_opts} {bin_path} && "
+           f"{FFMPEG_BASE_CMD} -i {bin_path} -pix_fmt yuv420p10le {recon_path}")
+    _run_cmd(cmd)
+
+
+def _run_vtm(src_path, bin_path, recon_path, width, height, quality, log_path):
+    cmd = (f"{VTM_BASE_CMD} -i {src_path} -o {recon_path} -b {bin_path}"
+           f" --ConformanceWindowMode=1 -q {quality} -wdt {width} -hgt {height}"
+           f" -f 1 -fr 1 --InternalBitDepth=10 > {log_path}")
+    _run_cmd(cmd)
+
+
+def _run_vvc(src_path, bin_path, recon_path, width, height, quality, log_path):
+    cmd = (f"{VVENC_BASE_CMD} --InputFile {src_path} -b {bin_path}"
+           f" --ConformanceWindowMode=1 --QP {quality} -s {width}x{height}"
+           f" -f 1 -fr 1 --InternalBitDepth=10 --threads=4 > {log_path} && "
+           f"{VVDEC_BASE_CMD} -b {bin_path} -o {recon_path} > {log_path}")
+    _run_cmd(cmd)
 
 
 def _run_cmd(cmd):

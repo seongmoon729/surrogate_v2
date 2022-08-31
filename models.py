@@ -46,23 +46,23 @@ class EndToEndNetwork(nn.Module):
                 if eval_codec: assert eval_quality
                 return self.inference(inputs, eval_codec, eval_quality, eval_downscale, eval_filtering)
 
-            # Preprocess inputs.
+            # Convert input format to RGB & batch the images after applying padding.
             images = self.preprocess_image_for_od(inputs)
 
-            # Normalize & filter image.
+            # Normalize & filter.
             images.tensor, (h, w) = self.filtering_network.preprocess(images.tensor)
             images.tensor = self.filtering_network(images.tensor / 255.)
 
-            # Process image with codec.
+            # Apply codec.
             codec_out = self.surrogate_network(images.tensor)
             images.tensor = self.filtering_network.postprocess(codec_out['x_hat'], (h, w))
-            bpp = self.compute_bpp(codec_out)
-            loss_r = torch.mean(bpp)
 
-            # Convert RGB to BGR & Denormalize.
+            # Compute averaged bit rate & use it as rate loss.
+            loss_r = torch.mean(self.compute_bpp(codec_out))
+
+            # Convert RGB to BGR & denormalize.
             images.tensor = images.tensor[:, [2, 1, 0], :, :] * 255.
 
-            # Detect objects.
             if 'instances' in inputs[0]:
                 gt_instances = [x['instances'].to(self.device) for x in inputs]
             else:
@@ -72,6 +72,7 @@ class EndToEndNetwork(nn.Module):
             else:
                 proposals = None
 
+            # Internally normalize input & compute losses for object detection.
             losses_d = self.vision_network(images, gt_instances, proposals)
             loss_d = sum(losses_d.values())
 
@@ -171,6 +172,7 @@ class EndToEndNetwork(nn.Module):
         return results
 
     def preprocess_image_for_od(self, batched_inputs):
+        """ Batch the images after padding. """
         images = [x['image'] for x in batched_inputs]
 
         # BGR -> RGB

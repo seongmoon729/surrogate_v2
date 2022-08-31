@@ -73,7 +73,7 @@ def train_for_object_detection(config):
 
         if step % 100 == 0:
             logger.info(f"step: {step:6} | loss_r: {losses['r']:7.4f} | loss_d: {losses['d']:7.4f}")        
-            checkpoint.save(
+            ckpt.save(
                 end2end_network.filtering_network,
                 optimizer,
                 step=step,

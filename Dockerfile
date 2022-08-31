@@ -23,7 +23,6 @@ RUN apt-get update && apt-get install -y \
 RUN wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | \
     gpg --dearmor - | tee /etc/apt/trusted.gpg.d/kitware.gpg >/dev/null
 RUN apt-add-repository "deb https://apt.kitware.com/ubuntu/ $(lsb_release -cs) main"
-RUN apt-get update
 RUN apt-get install -y kitware-archive-keyring
 RUN rm /etc/apt/trusted.gpg.d/kitware.gpg
 RUN apt-get install -y cmake
@@ -56,7 +55,6 @@ RUN python -m pip install \
 
 # Install FFmpeg
 RUN add-apt-repository ppa:savoury1/ffmpeg4
-RUN apt-get update
 RUN apt-get install -y ffmpeg
 
 # Set config file directory.

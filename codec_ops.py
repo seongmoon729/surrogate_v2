@@ -14,8 +14,6 @@ import numpy as np
 FFMPEG_BASE_CMD = f"ffmpeg -y -loglevel error"
 VTM_BASE_CMD    = f"vtm -c {os.environ['VTM_CFG_PATH']}"
 VVENC_BASE_CMD  = f"vvencFFapp -c {os.environ['VVENC_CFG_PATH']}"
-# VVENC_BASE_CMD  = f"vvencFFapp -c /surrogate_v2/vvenc.cfg"
-
 
 DS_LEVELS = [0, 1, 2, 3]
 CODEC_LIST = ['jpeg', 'webp', 'vtm', 'vvenc']
@@ -49,8 +47,8 @@ def codec_fn(x, codec, quality, downscale=0):
         assert quality in VVENC_QUALITIES, f"Choose one of {VVENC_QUALITIES}, lower is better."
 
     x = x.copy()
-    x *= 255.                      # Denormalize
-    x = x.transpose((1, 2, 0))     # (C, H, W) -> (H, W ,C)
+    x *= 255.                   # Denormalize
+    x = x.transpose(1, 2, 0)    # (C, H, W) -> (H, W ,C)
     x = x.round().astype('uint8')
     pil_img = Image.fromarray(x)
     
@@ -61,8 +59,8 @@ def codec_fn(x, codec, quality, downscale=0):
     pil_img_recon.close()
 
     x = x.astype('float32')
-    x = x.transpose((2, 0, 1))     # (H, W, C) -> (C, H, W)
-    x /= 255.                      # Normalize to [0, 1]
+    x = x.transpose(2, 0, 1)    # (H, W, C) -> (C, H, W)
+    x /= 255.                   # Normalize to [0, 1]
     return x, bpp
 
 
@@ -72,18 +70,19 @@ def run_codec(input, codec, q, ds=0):
     # Make temp directory for processing.
     dst_dir_obj = tempfile.TemporaryDirectory()
     dst_dir = Path(dst_dir_obj.name)
+    # dst_dir = Path('/surrogate_v2/codec_test/')
+    # dst_dir.mkdir(parents=True, exist_ok=True)
 
-    if isinstance(input, str):
-        src_img_path = input
-        pil_img = Image.open(src_img_path)
+    # Save input image in temp directory for cmd processing.
+    src_img_path = dst_dir / 'raw.png'
+    if isinstance(input, (str, Path)):
+        pil_img = Image.open(input)
     else:
-        # Save source input image in temp directory for cmd processing.
         pil_img = input
-        src_img_path = dst_dir / 'raw.png'
-        pil_img.save(src_img_path)
+    pil_img.save(src_img_path)
 
     # Define intermediate file names.
-    file_name = 'img'
+    file_name       = 'img'
     tmp_png_path    = dst_dir / (file_name + '.png')
     tmp_yuv_path    = dst_dir / (file_name + '.yuv')
     recon_yuv_path  = dst_dir / (file_name + '_recon.yuv')

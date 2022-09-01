@@ -35,7 +35,7 @@ class EndToEndNetwork(nn.Module):
             [od_cfg.INPUT.MIN_SIZE_TEST, od_cfg.INPUT.MIN_SIZE_TEST], od_cfg.INPUT.MAX_SIZE_TEST
         )
 
-    def forward(self, inputs, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=True):
+    def forward(self, inputs, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=False):
         """ Forward method. 
             Pre-fixed arguments with 'eval' are only for inference mode (.eval())
         """
@@ -81,7 +81,7 @@ class EndToEndNetwork(nn.Module):
             losses['d'] = loss_d
             return losses
 
-    def inference(self, original_image, codec, quality, downscale, filtering=True):
+    def inference(self, original_image, codec, quality, downscale, filtering):
         """ This method processes only one image (not batched!). """
         assert not self.training
         assert isinstance(original_image, np.ndarray)

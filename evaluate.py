@@ -214,7 +214,7 @@ def evaluate_for_object_detection(config):
 
                 # Evaluate. class-wise evaluation result is produced.
                 metrics = challenge_evaluator.evaluate()
-                mean_map = sum(metrics.values()) / len(metrics.values())
+                mean_map = list(metrics.values())[0]
                 mean_bpp = sum(bpps) / len(bpps)
             else:
                 pass

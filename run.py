@@ -119,7 +119,7 @@ def parse_args():
         default='data/open-images-v6-etri/validation/',
         help="Directory path for inputs.")
     eval_parser.add_argument(
-        "--num_parallel_eval_per_gpu", "-npepg", type=int, default=11,
+        "--num_parallel_eval_per_gpu", "-npepg", type=int, default=8,
         help="Number of parallel evaluators per gpu.")
 
     args = parser.parse_args()

@@ -43,7 +43,7 @@ def codec_fn(x, codec, quality, downscale=0):
         assert quality in WEBP_QUALITIES, f"Choose one of {WEBP_QUALITIES}, higher is better."
     elif codec == 'vtm':
         assert quality in VTM_QUALITIES, f"Choose one of {VTM_QUALITIES}, lower is better."
-    elif codec == 'vvc':
+    elif codec == 'vvenc':
         assert quality in VVENC_QUALITIES, f"Choose one of {VVENC_QUALITIES}, lower is better."
 
     x = x.copy()

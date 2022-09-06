@@ -27,6 +27,7 @@ class EndToEndNetwork(nn.Module):
         self.od_cfg = od_cfg
         self.input_format = input_format
 
+        # Networks.
         self.surrogate_network = ca_zoo.mbt2018(self.surrogate_quality, pretrained=True)
         self.filtering_network = FilteringNetwork(self.surrogate_network)
         self.vision_network = VisionNetwork(self.vision_task, self.od_cfg)
@@ -119,13 +120,11 @@ class EndToEndNetwork(nn.Module):
                 filtered_image = filtered_image.detach().cpu().numpy()
 
                 # 2. Apply codec.
-                if codec:  # a. conventional codec.
-                    reconstructed_image, bpp = ray.get(codec_ops.ray_codec_fn.remote(
-                        filtered_image,
-                        codec=codec,
-                        quality=quality,
-                        downscale=downscale))
-                else:      # b. surrogate codec.
+                if codec == 'none':
+                    # (a). without codec.
+                    reconstructed_image, bpp = filtered_image, 24.
+                elif codec == 'surrogate':
+                    # (b). surrogate codec.
                     filtered_image_ = torch.as_tensor(filtered_image, device=self.device)
                     filtered_image_, (h, w) = self.filtering_network.preprocess(filtered_image_)
                     codec_out = self.surrogate_network(filtered_image_[None, ...])
@@ -135,6 +134,13 @@ class EndToEndNetwork(nn.Module):
                     # Unpad.
                     reconstructed_image = self.filtering_network.postprocess(reconstructed_image, (h, w))
                     reconstructed_image = reconstructed_image.detach().cpu().numpy()
+                else:
+                    # (c). conventional codec.
+                    reconstructed_image, bpp = ray.get(codec_ops.ray_codec_fn.remote(
+                        filtered_image,
+                        codec=codec,
+                        quality=quality,
+                        downscale=downscale))
 
                 # Convert reconstructed image format to (H, W, C) & denormalize.
                 od_input_image = reconstructed_image.transpose(1, 2, 0) * 255.
@@ -193,6 +199,16 @@ class EndToEndNetwork(nn.Module):
     def device(self):
         return self.vision_network.device
 
+    def train(self):
+        self.surrogate_network.eval()
+        self.filtering_network.train()
+        self.vision_network.train()
+
+    def eval(self):
+        self.surrogate_network.eval()
+        self.filtering_network.eval()
+        self.vision_network.eval()
+
 
 class FilteringNetwork(nn.Module):
     def __init__(self, surrogate_network):
@@ -248,9 +264,21 @@ class FilteringNetwork(nn.Module):
         h, w = size
         x = x[..., :h, :w]
 
-        # Clip [0, 1]
+        # Clip to [0, 1].
         x = x.clip(0., 1.)
         return x
+
+    def train(self):
+        self.surrogate_network.eval()
+        self.surrogate_encoder.eval()
+        self.filter.train()
+        self.pixel_rate_estimator.train()
+
+    def eval(self):
+        self.surrogate_network.eval()
+        self.surrogate_encoder.eval()
+        self.filter.eval()
+        self.pixel_rate_estimator.eval()
 
 
 class VisionNetwork(nn.Module):

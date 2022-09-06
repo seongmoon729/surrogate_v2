@@ -29,7 +29,13 @@ def train_for_object_detection(config):
     target_params = (
         list(end2end_network.filtering_network.filter.parameters())
         + list(end2end_network.filtering_network.pixel_rate_estimator.parameters()))
-    optimizer = _create_optimizer(config.optimizer, config.learning_rate, target_params)
+    optimizer, lr_scheduler = _create_optimizer(
+        target_params,
+        config.optimizer,
+        config.lr_scheduler,
+        config.learning_rate,
+        config.steps,
+        config.final_lr_rate)
 
     # Search checkpoint files & resume.
     output_path = Path('out') / session_path
@@ -66,6 +72,7 @@ def train_for_object_detection(config):
         optimizer.zero_grad()
         loss_rd.backward()
         optimizer.step()
+        lr_scheduler.step()
 
         writer.add_scalar('Loss/rate', losses['r'].item(), step)
         writer.add_scalar('Loss/distortion', losses['d'].item(), step)
@@ -80,11 +87,20 @@ def train_for_object_detection(config):
                 persistent_period=config.checkpoint_period)
 
 
-def _create_optimizer(optim_name, learning_rate, parameters):
+def _create_optimizer(parameters, optim_name, scheduler_name, initial_lr, total_steps, final_rate=.1):
     if optim_name == 'sgd':
-        optimizer = optim.SGD(parameters, lr=learning_rate, momentum=0.9)
+        optimizer = optim.SGD(parameters, lr=initial_lr, momentum=0.9)
     elif optim_name == 'adam':
-        optimizer = optim.Adam(parameters, lr=learning_rate)
+        optimizer = optim.Adam(parameters, lr=initial_lr)
     else:
         raise NotImplemented("Currently supported optimizers are 'adam' and 'sgd'.")
-    return optimizer
+
+    if scheduler_name == 'constant':
+        scheduler = optim.lr_scheduler.ConstantLR(optimizer, factor=1.0)
+    elif scheduler_name == 'exponential':
+        gamma = final_rate ** (1 / total_steps)
+        scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
+    else:
+        raise NotImplemented("Currently supported schedulers are 'constant' and 'exponential'.")
+    
+    return optimizer, scheduler

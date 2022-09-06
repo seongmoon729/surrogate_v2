@@ -53,6 +53,12 @@ def parse_args():
         "--learning_rate", "-lr", type=float, default=1e-5,
         help="Learning rate.")
     train_parser.add_argument(
+        "--lr_scheduler", "-lrs", type=str, default='constant',
+        help="Learning rate scheduler.")
+    train_parser.add_argument(
+        "--final_lr_rate", "-flrr", type=float, default=1e-1,
+        help="Final learning rate factor.")
+    train_parser.add_argument(
         "--steps", "-s", type=int, default=50000,
         help="Number of total steps.")
     train_parser.add_argument(
@@ -119,7 +125,7 @@ def parse_args():
         default='data/open-images-v6-etri/validation/',
         help="Directory path for inputs.")
     eval_parser.add_argument(
-        "--num_parallel_eval_per_gpu", "-npepg", type=int, default=8,
+        "--num_parallel_eval_per_gpu", "-npepg", type=int, default=7,
         help="Number of parallel evaluators per gpu.")
 
     args = parser.parse_args()

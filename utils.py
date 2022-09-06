@@ -26,7 +26,14 @@ def build_session_path(config):
         f"q{config.surrogate_quality}_ld{config.lmbda}_{config.suffix}" if config.suffix
         else f"q{config.surrogate_quality}_ld{config.lmbda}"
     )
-    session_path /= f"bs{config.batch_size}_{config.optimizer}_lr{config.learning_rate}"
+    session_path /= f"s{config.steps}_bs{config.batch_size}_{config.optimizer}"
+    session_path = str(session_path)
+    if config.lr_scheduler == 'constant':
+        session_path = Path(
+            session_path + f"_{config.lr_scheduler}_lr{config.learning_rate}")
+    else:
+        session_path = Path(
+            session_path + f"_{config.lr_scheduler}_{config.final_lr_rate}_lr{config.learning_rate}")
     return session_path
 
 

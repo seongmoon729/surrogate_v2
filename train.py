@@ -74,12 +74,11 @@ def train_for_object_detection(config):
         optimizer.step()
         lr_scheduler.step()
 
-        writer.add_scalar('Loss/rate', losses['r'].item(), step)
-        writer.add_scalar('Loss/distortion', losses['d'].item(), step)
-        writer.add_scalar('Loss/combined', loss_rd.item(), step)
-        writer.add_scalar('lr', lr_scheduler.get_last_lr()[0])
-
         if step % 100 == 0:
+            writer.add_scalar('Loss/rate', losses['r'].item(), step)
+            writer.add_scalar('Loss/distortion', losses['d'].item(), step)
+            writer.add_scalar('Loss/combined', loss_rd.item(), step)
+            writer.add_scalar('lr', lr_scheduler.get_last_lr()[0], step)
             logger.info(f"step: {step:6} | loss_r: {losses['r']:7.4f} | loss_d: {losses['d']:7.4f}")        
             ckpt.save(
                 end2end_network.filtering_network,

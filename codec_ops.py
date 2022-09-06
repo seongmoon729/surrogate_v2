@@ -13,7 +13,8 @@ import numpy as np
 # Define base commands.
 FFMPEG_BASE_CMD = f"ffmpeg -y -loglevel error"
 VTM_BASE_CMD    = f"vtm -c {os.environ['VTM_CFG_PATH']}"
-VVENC_BASE_CMD  = f"vvencFFapp -c {os.environ['VVENC_CFG_PATH']}"
+# VVENC_BASE_CMD  = f"vvencFFapp -c {os.environ['VVENC_CFG_PATH']}"
+VVENC_BASE_CMD  = f"vvencFFapp -c {os.environ['VVENC_ORG_CFG_PATH']}"
 
 DS_LEVELS = [0, 1, 2, 3]
 CODEC_LIST = ['jpeg', 'webp', 'vtm', 'vvenc']

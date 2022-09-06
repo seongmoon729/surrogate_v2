@@ -213,11 +213,10 @@ class EndToEndNetwork(nn.Module):
 class FilteringNetwork(nn.Module):
     def __init__(self, surrogate_network):
         super().__init__()
-        self.surrogate_network = surrogate_network
-        self.surrogate_encoder = SurrogateEncoder(self.surrogate_network)
+        self.surrogate_encoder = SurrogateEncoder(surrogate_network)
 
         # TODO: Is this module necessary??
-        M, N = self.surrogate_network.M, self.surrogate_network.N
+        M, N = surrogate_network.M, surrogate_network.N
         self.pixel_rate_estimator = nn.Sequential(
             deconv(M, N, kernel_size=5, stride=2),
             GDN(N, inverse=True),
@@ -269,13 +268,11 @@ class FilteringNetwork(nn.Module):
         return x
 
     def train(self):
-        self.surrogate_network.eval()
         self.surrogate_encoder.eval()
         self.filter.train()
         self.pixel_rate_estimator.train()
 
     def eval(self):
-        self.surrogate_network.eval()
         self.surrogate_encoder.eval()
         self.filter.eval()
         self.pixel_rate_estimator.eval()
@@ -352,21 +349,27 @@ class VisionNetwork(nn.Module):
 class SurrogateEncoder(nn.Module):
     def __init__(self, surrogate_network):
         super().__init__()
-        self.surrogate_network = surrogate_network
+        self.g_a = surrogate_network.g_a
+        self.h_a = surrogate_network.h_a
+        self.entropy_bottleneck = surrogate_network.entropy_bottleneck
+        self.h_s = surrogate_network.h_s
+        self.gaussian_conditional = surrogate_network.gaussian_conditional
+        self.context_prediction = surrogate_network.context_prediction
+        self.entropy_parameters = surrogate_network.entropy_parameters
 
     def forward(self, x):
-        y = self.surrogate_network.g_a(x)
-        z = self.surrogate_network.h_a(y)
-        z_hat, _ = self.surrogate_network.entropy_bottleneck(z)
-        params = self.surrogate_network.h_s(z_hat)
+        y = self.g_a(x)
+        z = self.h_a(y)
+        z_hat, _ = self.entropy_bottleneck(z)
+        params = self.h_s(z_hat)
 
-        y_hat = self.surrogate_network.gaussian_conditional.quantize(y, "dequantize")
-        ctx_params = self.surrogate_network.context_prediction(y_hat)
-        gaussian_params = self.surrogate_network.entropy_parameters(
+        y_hat = self.gaussian_conditional.quantize(y, 'dequantize')
+        ctx_params = self.context_prediction(y_hat)
+        gaussian_params = self.entropy_parameters(
             torch.cat((params, ctx_params), dim=1)
         )
         scales_hat, means_hat = gaussian_params.chunk(2, 1)
-        _, y_likelihoods = self.surrogate_network.gaussian_conditional(y, scales_hat, means=means_hat)
+        _, y_likelihoods = self.gaussian_conditional(y, scales_hat, means=means_hat)
         return y_likelihoods
     
 

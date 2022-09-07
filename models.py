@@ -200,11 +200,13 @@ class EndToEndNetwork(nn.Module):
         return self.vision_network.device
 
     def train(self):
+        self.training = True
         self.surrogate_network.eval()
         self.filtering_network.train()
         self.vision_network.train()
 
     def eval(self):
+        self.training = False
         self.surrogate_network.eval()
         self.filtering_network.eval()
         self.vision_network.eval()
@@ -268,11 +270,13 @@ class FilteringNetwork(nn.Module):
         return x
 
     def train(self):
+        self.training = True
         self.surrogate_encoder.eval()
         self.filter.train()
         self.pixel_rate_estimator.train()
 
     def eval(self):
+        self.training = False
         self.surrogate_encoder.eval()
         self.filter.eval()
         self.pixel_rate_estimator.eval()

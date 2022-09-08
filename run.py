@@ -83,7 +83,7 @@ def parse_args():
         "--session_step", "-ss", type=int, default=0,
         help="Checkpoint step for saved session (0 is dummy for baseline).")
     eval_parser.add_argument(
-        "--eval_codec", "-ec", type=str, default='vtm',
+        "--eval_codec", "-ec", type=str, default='vvenc',
         help="Choose codec to use in evaluation.")
     eval_parser.add_argument(
         "--eval_quality", "-eq", type=str,
@@ -132,7 +132,7 @@ def parse_args():
     if args.command is None:
         parser.print_usage()
         sys.exit(2)
-    if args.command == 'evaluate':
+    if args.command == 'evaluate' and args.eval_codec != 'surrogate':
         if args.eval_codec == 'jpeg':
             qualities = JPEG_QUALITIES
         elif args.eval_codec == 'webp':

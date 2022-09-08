@@ -96,15 +96,18 @@ def evaluate_for_object_detection(config):
     vision_task, _, _, _ = utils.inspect_session_path(session_path)
 
     # Generate evaluation settings.
-    if ',' in config.eval_downscale:
-        eval_downscales = list(map(int, config.eval_downscale.split(',')))
+    if config.eval_codec == 'surrogate':
+        eval_settings = [(None, None)]
     else:
-        eval_downscales = [int(config.eval_downscale)]
-    if ',' in config.eval_quality:
-        eval_qualities = list(map(int, config.eval_quality.split(',')))
-    else:
-        eval_qualities = [int(config.eval_quality)]
-    eval_settings = list(itertools.product(eval_downscales, eval_qualities))
+        if ',' in config.eval_downscale:
+            eval_downscales = list(map(int, config.eval_downscale.split(',')))
+        else:
+            eval_downscales = [int(config.eval_downscale)]
+        if ',' in config.eval_quality:
+            eval_qualities = list(map(int, config.eval_quality.split(',')))
+        else:
+            eval_qualities = [int(config.eval_quality)]
+        eval_settings = list(itertools.product(eval_downscales, eval_qualities))
 
     # Create or load result dataframe.
     if result_path.exists():

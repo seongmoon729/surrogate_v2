@@ -44,7 +44,6 @@ class EndToEndNetwork(nn.Module):
             pass
         else:
             if not self.training:
-                if eval_codec: assert eval_quality
                 return self.inference(inputs, eval_codec, eval_quality, eval_downscale, eval_filtering)
 
             # Convert input format to RGB & batch the images after applying padding.
@@ -129,7 +128,7 @@ class EndToEndNetwork(nn.Module):
                     filtered_image_, (h, w) = self.filtering_network.preprocess(filtered_image_)
                     codec_out = self.surrogate_network(filtered_image_[None, ...])
                     reconstructed_image, bpp = (
-                        self.filtering_network.postprocess(codec_out['x_hat'][0]),
+                        self.filtering_network.postprocess(codec_out['x_hat'][0], (h, w)),
                         self.compute_bpp(codec_out).item())
                     # Unpad.
                     reconstructed_image = self.filtering_network.postprocess(reconstructed_image, (h, w))
@@ -199,18 +198,6 @@ class EndToEndNetwork(nn.Module):
     def device(self):
         return self.vision_network.device
 
-    def train(self):
-        self.training = True
-        self.surrogate_network.eval()
-        self.filtering_network.train()
-        self.vision_network.train()
-
-    def eval(self):
-        self.training = False
-        self.surrogate_network.eval()
-        self.filtering_network.eval()
-        self.vision_network.eval()
-
 
 class FilteringNetwork(nn.Module):
     def __init__(self, surrogate_network):
@@ -268,18 +255,6 @@ class FilteringNetwork(nn.Module):
         # Clip to [0, 1].
         x = x.clip(0., 1.)
         return x
-
-    def train(self):
-        self.training = True
-        self.surrogate_encoder.eval()
-        self.filter.train()
-        self.pixel_rate_estimator.train()
-
-    def eval(self):
-        self.training = False
-        self.surrogate_encoder.eval()
-        self.filter.eval()
-        self.pixel_rate_estimator.eval()
 
 
 class VisionNetwork(nn.Module):
@@ -348,6 +323,10 @@ class VisionNetwork(nn.Module):
     @property
     def size_divisibility(self):
         return self.model.backbone.size_divisibility
+
+    def train(self, mode=True):
+        super().train(mode)
+        self.model.backbone.train(False)
 
 
 class SurrogateEncoder(nn.Module):

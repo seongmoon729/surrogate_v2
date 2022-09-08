@@ -111,9 +111,10 @@ def evaluate_for_object_detection(config):
 
     # Create or load result dataframe.
     if result_path.exists():
-        result_df = pd.read_csv(result_path)
+        subset_df = pd.read_csv(result_path).copy()
         # Delete already evaluated settings.
-        subset_df = result_df[result_df.task == vision_task]
+        subset_df = subset_df[subset_df.step == config.session_step]
+        subset_df = subset_df[subset_df.task == vision_task]
         subset_df = subset_df[subset_df.codec == config.eval_codec]
         evaluated_settings = itertools.product(subset_df.downscale, subset_df.quality)
         for _setting in evaluated_settings:

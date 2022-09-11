@@ -41,16 +41,10 @@ def inspect_session_path(session_path):
     session_path = Path(session_path)
     is_saved_session = 'base' not in session_path.name
 
-    vision_network = session_path.parent
-    vision_task = session_path.parent.parent
     surrogate_quality = 1  # dummy
     if is_saved_session:
-        vision_network = vision_network.parent
-        vision_task = vision_task.parent
         surrogate_quality = int(session_path.parent.name.split('_')[0][1:])
-    vision_network = vision_network.name
-    vision_task = vision_task.name
-    return vision_task, vision_network, surrogate_quality, is_saved_session
+    return surrogate_quality, is_saved_session
 
 
 def get_od_cfg(od_task, od_network):

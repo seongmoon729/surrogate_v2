@@ -50,7 +50,7 @@ def parse_args():
         "--optimizer", "-opt", type=str, default="adam",
         help="Optimizer.")
     train_parser.add_argument(
-        "--learning_rate", "-lr", type=float, default=1e-5,
+        "--learning_rate", "-lr", type=float, default=1e-4,
         help="Learning rate.")
     train_parser.add_argument(
         "--lr_scheduler", "-lrs", type=str, default='constant',
@@ -72,6 +72,12 @@ def parse_args():
         "evaluate",
         formatter_class=argparse.RawTextHelpFormatter,
         description="")
+    eval_parser.add_argument(
+        "--vision_task", "-vt", type=str, default="detection",
+        help="Vision task ('classification', 'detection', 'segmentation').")
+    eval_parser.add_argument(
+        "--vision_network", "-vn", type=str, default="faster_rcnn_X_101_32x8d_FPN_3x",
+        help="Name of vision task network.")
     eval_parser.add_argument(
         "--session_path", "-sp", type=str,
         default='out/detection/faster_rcnn_X_101_32x8d_FPN_3x/base',
@@ -125,7 +131,7 @@ def parse_args():
         default='data/open-images-v6-etri/validation/',
         help="Directory path for inputs.")
     eval_parser.add_argument(
-        "--num_parallel_eval_per_gpu", "-npepg", type=int, default=7,
+        "--num_parallel_eval_per_gpu", "-npepg", type=int, default=6,
         help="Number of parallel evaluators per gpu.")
 
     args = parser.parse_args()
@@ -161,7 +167,7 @@ def main(args):
 
     if args.command == 'train':
         import train
-        train.train_for_object_detection(args)
+        train.train(args)
     else:
         import evaluate
         evaluate.evaluate_for_object_detection(args)

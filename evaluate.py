@@ -17,23 +17,22 @@ import oid_mask_encoding
 
 
 class Evaluator:
-    def __init__(self, session_path, session_step, coco_classes):
+    def __init__(self, vision_task, vision_network, session_path, session_step, coco_classes):
         warnings.filterwarnings('ignore', category=UserWarning)
+        self.vision_task = vision_task
+        self.vision_network = vision_network
         self.session_path = session_path
         self.session_step = session_step
         self.coco_classes = coco_classes
 
         session_path = Path(session_path)
         session_path.mkdir(parents=True, exist_ok=True)    
-        (self.vision_task,
-         self.vision_network,
-         surrogate_quality,
-         self.is_saved_session) = utils.inspect_session_path(session_path)
+        surrogate_quality, self.is_saved_session = utils.inspect_session_path(session_path)
 
         # Build end-to-end network.
-        cfg = utils.get_od_cfg(self.vision_task, self.vision_network)
+        cfg = utils.get_od_cfg(vision_task, vision_network)
         self.end2end_network = models.EndToEndNetwork(
-            surrogate_quality, self.vision_task, od_cfg=cfg)
+            surrogate_quality, vision_task, od_cfg=cfg)
 
         # Restore weights.
         if self.is_saved_session:
@@ -85,15 +84,14 @@ class Evaluator:
 
 def evaluate_for_object_detection(config):
     logger = utils.get_logger()
-    logger.info(f"Start evaluation script for '{config.session_path}'.")
+    logger.info(f"Evaluate '{config.session_path}' session with step size {config.session_step}.")
+    logger.info(f"Task : {config.vision_task}")
+    logger.info(f"Network : {config.vision_network}")
     ray.init()
 
     session_path = Path(config.session_path)
     session_path.mkdir(parents=True, exist_ok=True)
     result_path = session_path / 'result.csv'
-    
-    # Parse vision task.
-    vision_task, _, _, _ = utils.inspect_session_path(session_path)
 
     # Generate evaluation settings.
     if config.eval_codec == 'surrogate':
@@ -111,10 +109,11 @@ def evaluate_for_object_detection(config):
 
     # Create or load result dataframe.
     if result_path.exists():
-        subset_df = pd.read_csv(result_path).copy()
+        result_df = pd.read_csv(result_path)
+        subset_df = result_df.copy()
         # Delete already evaluated settings.
         subset_df = subset_df[subset_df.step == config.session_step]
-        subset_df = subset_df[subset_df.task == vision_task]
+        subset_df = subset_df[subset_df.task == config.vision_task]
         subset_df = subset_df[subset_df.codec == config.eval_codec]
         evaluated_settings = itertools.product(subset_df.downscale, subset_df.quality)
         for _setting in evaluated_settings:
@@ -146,7 +145,12 @@ def evaluate_for_object_detection(config):
     n_gpu = len(config.gpu.split(',')) if ',' in config.gpu else 1
     n_eval = config.num_parallel_eval_per_gpu * n_gpu
     eval_builder = ray.remote(num_gpus=(1 / config.num_parallel_eval_per_gpu))(Evaluator)
-    eval_init_args = (session_path, config.session_step, coco_classes)
+    eval_init_args = (
+        config.vision_task,
+        config.vision_network,
+        session_path,
+        config.session_step,
+        coco_classes)
 
     #TODO. Memory growth issue (~ 174GB).
     logger.info("Start evaluation loop.")
@@ -194,7 +198,7 @@ def evaluate_for_object_detection(config):
 
             # Postprocess: Convert coco to oid.
             columns = ['ImageID', 'LabelName', 'Score', 'XMin', 'XMax', 'YMin', 'YMax']
-            if vision_task == 'segmentation':
+            if config.vision_task == 'segmentation':
                 columns += ['ImageWidth', 'ImageHeight', 'Mask']
             od_output_df = pd.DataFrame(od_outputs, columns=columns)
 
@@ -203,7 +207,7 @@ def evaluate_for_object_detection(config):
             od_output_df = od_output_df[od_output_df['LabelName'].isin(selected_classes)]
 
             # Open images challenge evaluation.
-            if vision_task == 'detection':
+            if config.vision_task == 'detection':
                 # Generate open image challenge evaluator.
                 challenge_evaluator = (
                     object_detection_evaluation.OpenImagesChallengeEvaluator(
@@ -223,7 +227,7 @@ def evaluate_for_object_detection(config):
             else:
                 pass
             result = {
-                'task'     : vision_task,
+                'task'     : config.vision_task,
                 'codec'    : config.eval_codec,
                 'downscale': downscale,
                 'quality'  : quality,
@@ -233,7 +237,7 @@ def evaluate_for_object_detection(config):
             }
             result_df = pd.concat([result_df, pd.DataFrame([result])], ignore_index=True)
             result_df.sort_values(
-                by=['task', 'codec', 'downscale', 'bpp'], inplace=True)
+                by=['task', 'codec', 'downscale', 'step', 'bpp'], inplace=True)
             result_df.to_csv(result_path, index=False)
 
 

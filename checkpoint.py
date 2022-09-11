@@ -35,8 +35,11 @@ class Checkpoint:
                 assert target_ckpt_path.exists()
             
             # Load.
-            target_ckpt = torch.load(target_ckpt_path, map_location=torch.device('cpu'))
-            network.load_state_dict(target_ckpt['network'])
+            target_ckpt = torch.load(target_ckpt_path, map_location=network.device)
+            if 'network' in target_ckpt:
+                network.load_state_dict(target_ckpt['network'])
+            elif 'model' in target_ckpt:
+                network.load_state_dict(target_ckpt['model'])
             if optimizer:
                 optimizer.load_state_dict(target_ckpt['optimizer'])
             step = target_ckpt['step']

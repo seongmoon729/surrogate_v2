@@ -199,68 +199,6 @@ class EndToEndNetwork(nn.Module):
         return self.vision_network.device
 
 
-class FilteringNetwork(nn.Module):
-    def __init__(self, surrogate_network):
-        super().__init__()
-        self.surrogate_encoder = SurrogateEncoder(surrogate_network)
-
-        # TODO: Is this module necessary??
-        M, N = surrogate_network.M, surrogate_network.N
-        self.pixel_rate_estimator = nn.Sequential(
-            deconv(M, N, kernel_size=5, stride=2),
-            GDN(N, inverse=True),
-            deconv(N, N // 2, kernel_size=5, stride=2),
-            GDN(N // 2, inverse=True),
-            deconv(N // 2, N // 4, kernel_size=5, stride=2),
-            GDN(N // 4, inverse=True),
-            deconv(N // 4, 16, kernel_size=5, stride=2),
-        )
-
-        self.filter = nn.Sequential(
-            FilteringBlock(19, 64),
-            FilteringBlock(64, 64),
-            FilteringBlock(64, 64),
-            FilteringBlock(64, 64),
-            # nn.Conv2d(64, 3, kernel_size=3, stride=1, padding='same'),
-            nn.Conv2d(64, 3, kernel_size=1, stride=1),
-            nn.Tanh(),
-        )
-
-    def forward(self, x):
-        out = self.surrogate_encoder(x)
-        out = self.pixel_rate_estimator(out)
-        out = torch.cat([x, out], axis=1)
-        out = self.filter(out)
-        out = out + x
-        out = torch.clip(out, 0., 1.)
-        return out
-
-    def preprocess(self, x):
-        # Pad.
-        def _check_for_padding(x):
-            remainder = x % 64
-            if remainder:
-                return 64 - remainder
-            return remainder
-        h, w = x.shape[-2:]
-        h_pad, w_pad = map(_check_for_padding, (h, w))
-        x = F.pad(x, [0, w_pad, 0, h_pad])
-        return x, (h, w)
-        
-    def postprocess(self, x, size):
-        # Unpad.
-        h, w = size
-        x = x[..., :h, :w]
-
-        # Clip to [0, 1].
-        x = x.clip(0., 1.)
-        return x
-
-    @property
-    def device(self):
-        return next(self.parameters()).device
-
-
 class VisionNetwork(nn.Module):
     def __init__(self, task, od_cfg):
         super().__init__()
@@ -333,31 +271,66 @@ class VisionNetwork(nn.Module):
         self.model.backbone.train(False)
 
 
-class SurrogateEncoder(nn.Module):
+class FilteringNetwork(nn.Module):
     def __init__(self, surrogate_network):
         super().__init__()
-        self.g_a = surrogate_network.g_a
-        self.h_a = surrogate_network.h_a
-        self.entropy_bottleneck = surrogate_network.entropy_bottleneck
-        self.h_s = surrogate_network.h_s
-        self.gaussian_conditional = surrogate_network.gaussian_conditional
-        self.context_prediction = surrogate_network.context_prediction
-        self.entropy_parameters = surrogate_network.entropy_parameters
+        self.surrogate_encoder = SurrogateEncoder(surrogate_network)
+
+        # TODO: Is this module necessary??
+        M, N = surrogate_network.M, surrogate_network.N
+        self.pixel_rate_estimator = nn.Sequential(
+            deconv(M, N, kernel_size=5, stride=2),
+            GDN(N, inverse=True),
+            deconv(N, N // 2, kernel_size=5, stride=2),
+            GDN(N // 2, inverse=True),
+            deconv(N // 2, N // 4, kernel_size=5, stride=2),
+            GDN(N // 4, inverse=True),
+            deconv(N // 4, 16, kernel_size=5, stride=2),
+        )
+
+        self.filter = nn.Sequential(
+            FilteringBlock(19, 64),
+            FilteringBlock(64, 64),
+            FilteringBlock(64, 64),
+            FilteringBlock(64, 64),
+            # nn.Conv2d(64, 3, kernel_size=3, stride=1, padding='same'),
+            nn.Conv2d(64, 3, kernel_size=1, stride=1),
+            nn.Tanh(),
+        )
 
     def forward(self, x):
-        y = self.g_a(x)
-        z = self.h_a(y)
-        z_hat, _ = self.entropy_bottleneck(z)
-        params = self.h_s(z_hat)
+        out = self.surrogate_encoder(x)
+        out = self.pixel_rate_estimator(out)
+        out = torch.cat([x, out], axis=1)
+        out = self.filter(out)
+        out = out + x
+        out = torch.clip(out, 0., 1.)
+        return out
 
-        y_hat = self.gaussian_conditional.quantize(y, 'dequantize')
-        ctx_params = self.context_prediction(y_hat)
-        gaussian_params = self.entropy_parameters(
-            torch.cat((params, ctx_params), dim=1)
-        )
-        scales_hat, means_hat = gaussian_params.chunk(2, 1)
-        _, y_likelihoods = self.gaussian_conditional(y, scales_hat, means=means_hat)
-        return y_likelihoods
+    def preprocess(self, x):
+        # Pad.
+        def _check_for_padding(x):
+            remainder = x % 64
+            if remainder:
+                return 64 - remainder
+            return remainder
+        h, w = x.shape[-2:]
+        h_pad, w_pad = map(_check_for_padding, (h, w))
+        x = F.pad(x, [0, w_pad, 0, h_pad])
+        return x, (h, w)
+        
+    def postprocess(self, x, size):
+        # Unpad.
+        h, w = size
+        x = x[..., :h, :w]
+
+        # Clip to [0, 1].
+        x = x.clip(0., 1.)
+        return x
+
+    @property
+    def device(self):
+        return next(self.parameters()).device
     
 
 class FilteringBlock(nn.Module):
@@ -385,6 +358,33 @@ class FilteringBlock(nn.Module):
         out = out + x
         out = self.relu(out)
         return out
+
+
+class SurrogateEncoder(nn.Module):
+    def __init__(self, surrogate_network):
+        super().__init__()
+        self.g_a = surrogate_network.g_a
+        self.h_a = surrogate_network.h_a
+        self.entropy_bottleneck = surrogate_network.entropy_bottleneck
+        self.h_s = surrogate_network.h_s
+        self.gaussian_conditional = surrogate_network.gaussian_conditional
+        self.context_prediction = surrogate_network.context_prediction
+        self.entropy_parameters = surrogate_network.entropy_parameters
+
+    def forward(self, x):
+        y = self.g_a(x)
+        z = self.h_a(y)
+        z_hat, _ = self.entropy_bottleneck(z)
+        params = self.h_s(z_hat)
+
+        y_hat = self.gaussian_conditional.quantize(y, 'dequantize')
+        ctx_params = self.context_prediction(y_hat)
+        gaussian_params = self.entropy_parameters(
+            torch.cat((params, ctx_params), dim=1)
+        )
+        scales_hat, means_hat = gaussian_params.chunk(2, 1)
+        _, y_likelihoods = self.gaussian_conditional(y, scales_hat, means=means_hat)
+        return y_likelihoods
 
 
 def build_object_detection_model(cfg):

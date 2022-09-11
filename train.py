@@ -1,8 +1,15 @@
+import os
+import sys
 from pathlib import Path
+from datetime import timedelta
 
 import torch
 import torch.optim as optim
+import torch.distributed as dist
+import torch.multiprocessing as mp
 from torch.utils.tensorboard import SummaryWriter
+from torch.nn.parallel import DistributedDataParallel
+import detectron2.utils.comm as comm
 from detectron2.data import build_detection_train_loader
 
 import utils
@@ -10,13 +17,71 @@ import models
 import checkpoint
 
 
-# TODO. Multi-gpu support.
-def train_for_object_detection(config):
+_PORT = 2**15 + 2**14 + hash(os.getuid() if sys.platform != "win32" else 1) % 2**14
+_DIST_URL = f"tcp://127.0.0.1:{_PORT}"
+_DEFAULT_TIMEOUT = timedelta(minutes=30)
+
+
+def train(config):
+    n_gpu = len(config.gpu.split(',')) if ',' in config.gpu else 1
+
+    if n_gpu > 1:
+        mp.spawn(
+            _dist_train_worker,
+            nprocs=n_gpu,
+            args=(
+                _train_for_object_detection,
+                n_gpu,
+                n_gpu,
+                0,
+                _DIST_URL,
+                (config,),
+                _DEFAULT_TIMEOUT,
+            ),
+            daemon=False,
+        )
+    else:
+        _train_for_object_detection(config)
+
+
+def _dist_train_worker(
+    local_rank,
+    main_func,
+    world_size,
+    num_gpus_per_machine,
+    machine_rank,
+    dist_url,
+    args,
+    timeout,
+):
+    global_rank = machine_rank * num_gpus_per_machine + local_rank
+    dist.init_process_group(
+        backend="NCCL",
+        init_method=dist_url,
+        world_size=world_size,
+        rank=global_rank,
+        timeout=timeout,
+    )
+    num_machines = world_size // num_gpus_per_machine
+    for i in range(num_machines):
+        ranks_on_i = list(range(i * num_gpus_per_machine, (i + 1) * num_gpus_per_machine))
+        pg = dist.new_group(ranks_on_i)
+        if i == machine_rank:
+            comm._LOCAL_PROCESS_GROUP = pg
+
+    assert num_gpus_per_machine <= torch.cuda.device_count()
+    torch.cuda.set_device(local_rank)
+    comm.synchronize()
+    main_func(*args)
+
+
+def _train_for_object_detection(config):
     logger = utils.get_logger()
 
     # Set session path (path for artifacts of training).
     session_path = utils.build_session_path(config)
-    logger.info(f"Start training script for '{session_path}'.")
+    if comm.is_main_process():
+        logger.info(f"Start training script for '{session_path}'.")
 
     # Get detectron2 config data.
     cfg = utils.get_od_cfg(config.vision_task, config.vision_network)
@@ -25,10 +90,17 @@ def train_for_object_detection(config):
     end2end_network = models.EndToEndNetwork(
         config.surrogate_quality, config.vision_task, od_cfg=cfg)
 
+    # Load on GPU.
+    end2end_network.cuda()
+
+    # Set mode as training.
+    end2end_network.train()
+
     # Build optimizer.
     target_params = (
-        list(end2end_network.filtering_network.filter.parameters())
-        + list(end2end_network.filtering_network.pixel_rate_estimator.parameters()))
+        list(end2end_network.filtering_network.filter.parameters()) +
+        list(end2end_network.filtering_network.pixel_rate_estimator.parameters())
+    )
     optimizer, lr_scheduler = _create_optimizer(
         target_params,
         config.optimizer,
@@ -39,23 +111,28 @@ def train_for_object_detection(config):
 
     # Search checkpoint files & resume.
     output_path = Path('out') / session_path
+    last_step = 0
     ckpt = checkpoint.Checkpoint(output_path)
     last_step = ckpt.resume(end2end_network.filtering_network, optimizer)
-    if last_step:
-        logger.info(f"Resume training. Last step is {last_step}.")
-    else:
-        logger.info("Start training from the scratch.")
+    if comm.is_main_process():
+        if last_step:
+            logger.info(f"Resume training. Last step is {last_step}.")
+        else:
+            logger.info("Start training from the scratch.")
+
+    # Distributed.
+    distributed = comm.get_world_size() > 1
+    if distributed:
+        end2end_network = DistributedDataParallel(
+            end2end_network,
+            device_ids=[comm.get_local_rank()],
+            broadcast_buffers=False,
+            find_unused_parameters=True
+        )
 
     # Create summary writer.
-    writer = SummaryWriter(output_path)
-
-    # Set as training mode & load on GPU.
-    end2end_network.train()
-    end2end_network.cuda()
-    for state in optimizer.state.values():
-        for k, v in state.items():
-            if isinstance(v, torch.Tensor):
-                state[k] = v.cuda()
+    if comm.is_main_process():
+        writer = SummaryWriter(output_path)
 
     # Build data loader.
     cfg.SOLVER.IMS_PER_BATCH = config.batch_size
@@ -74,19 +151,24 @@ def train_for_object_detection(config):
         optimizer.step()
         lr_scheduler.step()
 
-        # Write on tensorboard.
-        writer.add_scalar('train/loss/rate', losses['r'].item(), step)
-        writer.add_scalar('train/loss/distortion', losses['d'].item(), step)
-        writer.add_scalar('train/loss/combined', loss_rd.item(), step)
-        writer.add_scalar('train/lr', lr_scheduler.get_last_lr()[0], step)
+        # Calculate reduced losses.
+        losses = {k: v.item() for k, v in comm.reduce_dict(losses).items()}
+        loss_rd = losses['r'] + config.lmbda * losses['d']
 
-        if step % 100 == 0:
-            logger.info(f"step: {step:6} | loss_r: {losses['r']:7.4f} | loss_d: {losses['d']:7.4f}")        
-            ckpt.save(
-                end2end_network.filtering_network,
-                optimizer,
-                step=step,
-                persistent_period=config.checkpoint_period)
+        # Write on tensorboard.
+        if comm.is_main_process():
+            writer.add_scalar('train/loss/rate', losses['r'], step)
+            writer.add_scalar('train/loss/distortion', losses['d'], step)
+            writer.add_scalar('train/loss/combined', loss_rd, step)
+            writer.add_scalar('train/lr', lr_scheduler.get_last_lr()[0], step)
+
+            if step % 100 == 0:
+                logger.info(f"step: {step:6} | loss_r: {losses['r']:7.4f} | loss_d: {losses['d']:7.4f}")        
+                ckpt.save(
+                    end2end_network.module.filtering_network,
+                    optimizer,
+                    step=step,
+                    persistent_period=config.checkpoint_period)
 
 
 def _create_optimizer(parameters, optim_name, scheduler_name, initial_lr, total_steps, final_rate=.1):
@@ -104,5 +186,4 @@ def _create_optimizer(parameters, optim_name, scheduler_name, initial_lr, total_
         scheduler = optim.lr_scheduler.ExponentialLR(optimizer, gamma=gamma)
     else:
         raise NotImplemented("Currently supported schedulers are 'constant' and 'exponential'.")
-    
     return optimizer, scheduler

@@ -256,6 +256,10 @@ class FilteringNetwork(nn.Module):
         x = x.clip(0., 1.)
         return x
 
+    @property
+    def device(self):
+        return next(self.parameters()).device
+
 
 class VisionNetwork(nn.Module):
     def __init__(self, task, od_cfg):

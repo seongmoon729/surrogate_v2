@@ -1,3 +1,4 @@
+from statistics import variance
 import ray
 import numpy as np
 
@@ -338,12 +339,14 @@ class FilteringBlock(nn.Module):
         super().__init__()
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding='same'),
-            nn.BatchNorm2d(out_channels),
+            # nn.BatchNorm2d(out_channels),
+            ChannelNorm2d(out_channels),
             nn.ReLU(inplace=True),
         )
         self.conv2 = nn.Sequential(
             nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding='same'),
-            nn.BatchNorm2d(out_channels),
+            # nn.BatchNorm2d(out_channels),
+            ChannelNorm2d(out_channels),
         )
         self.proj = None
         if in_channels != out_channels:
@@ -385,6 +388,32 @@ class SurrogateEncoder(nn.Module):
         scales_hat, means_hat = gaussian_params.chunk(2, 1)
         _, y_likelihoods = self.gaussian_conditional(y, scales_hat, means=means_hat)
         return y_likelihoods
+
+
+class ChannelNorm2d(nn.Module):
+    def __init__(self, num_features, eps=1e-3):
+        super().__init__()
+        self.num_features = num_features
+        self.eps = eps
+        self.gamma = nn.parameter.Parameter(
+            torch.empty((num_features,), dtype='float32'), requires_grad=True
+        )
+        self.beta = nn.parameter.Parameter(
+            torch.empty((num_features,), dtype='float32'), requires_grad=True
+        )
+        nn.init.ones_(self.gamma)
+        nn.init.zeros_(self.beta)
+
+    def _get_moments(self, x):
+        mean = x.mean(dim=-1, keepdim=True)
+        variance = torch.sum((x - mean.detach()) ** 2, dim=-1, keepdim=True)
+        # Divide by N - 1
+        variance /= (self.num_features - 1)
+        return mean, variance
+
+    def forward(self, x):
+        mean, variance = self._get_moments(x)
+        return F.batch_norm(x, mean, variance, self.gamma, self.beta, momentum=.0, eps=self.eps)
 
 
 def build_object_detection_model(cfg):

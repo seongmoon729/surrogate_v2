@@ -396,24 +396,26 @@ class ChannelNorm2d(nn.Module):
         self.num_features = num_features
         self.eps = eps
         self.gamma = nn.parameter.Parameter(
-            torch.empty((num_features,), dtype='float32'), requires_grad=True
+            torch.empty((num_features,), dtype=torch.float32), requires_grad=True
         )
         self.beta = nn.parameter.Parameter(
-            torch.empty((num_features,), dtype='float32'), requires_grad=True
+            torch.empty((num_features,), dtype=torch.float32), requires_grad=True
         )
         nn.init.ones_(self.gamma)
         nn.init.zeros_(self.beta)
 
     def _get_moments(self, x):
-        mean = x.mean(dim=-1, keepdim=True)
-        variance = torch.sum((x - mean.detach()) ** 2, dim=-1, keepdim=True)
+        mean = x.mean(dim=1, keepdim=True)
+        variance = torch.sum((x - mean.detach()) ** 2, dim=1, keepdim=True)
         # Divide by N - 1
         variance /= (self.num_features - 1)
         return mean, variance
 
     def forward(self, x):
         mean, variance = self._get_moments(x)
-        return F.batch_norm(x, mean, variance, self.gamma, self.beta, momentum=.0, eps=self.eps)
+        x = (x - mean) / (torch.sqrt(variance) + self.eps)
+        x = x * self.gamma[None, :, None, None] + self.beta[None, :, None, None]
+        return x
 
 
 def build_object_detection_model(cfg):

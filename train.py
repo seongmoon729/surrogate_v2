@@ -163,9 +163,13 @@ def _train_for_object_detection(config):
             writer.add_scalar('train/lr', lr_scheduler.get_last_lr()[0], step)
 
             if step % 100 == 0:
-                logger.info(f"step: {step:6} | loss_r: {losses['r']:7.4f} | loss_d: {losses['d']:7.4f}")        
+                logger.info(f"step: {step:6} | loss_r: {losses['r']:7.4f} | loss_d: {losses['d']:7.4f}")
+                if distributed:
+                    target_network = end2end_network.module.filtering_network
+                else:
+                    target_network = end2end_network.filtering_network
                 ckpt.save(
-                    end2end_network.module.filtering_network,
+                    target_network,
                     optimizer,
                     step=step,
                     persistent_period=config.checkpoint_period)

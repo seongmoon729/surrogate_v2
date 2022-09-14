@@ -94,7 +94,7 @@ def evaluate_for_object_detection(config):
     result_path = session_path / 'result.csv'
 
     # Generate evaluation settings.
-    if config.eval_codec == 'surrogate':
+    if config.eval_codec in ['none', 'surrogate']:
         eval_settings = [(None, None)]
     else:
         if ',' in config.eval_downscale:

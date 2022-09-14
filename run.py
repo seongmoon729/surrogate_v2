@@ -138,7 +138,7 @@ def parse_args():
     if args.command is None:
         parser.print_usage()
         sys.exit(2)
-    if args.command == 'evaluate' and args.eval_codec != 'surrogate':
+    if args.command == 'evaluate' and args.eval_codec not in ['none', 'surrogate']:
         if args.eval_codec == 'jpeg':
             qualities = JPEG_QUALITIES
         elif args.eval_codec == 'webp':

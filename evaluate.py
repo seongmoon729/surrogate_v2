@@ -26,7 +26,7 @@ class Evaluator:
         self.coco_classes = coco_classes
 
         session_path = Path(session_path)
-        session_path.mkdir(parents=True, exist_ok=True)    
+        session_path.mkdir(parents=True, exist_ok=True)
         surrogate_quality, self.is_saved_session = utils.inspect_session_path(session_path)
 
         # Build end-to-end network.
@@ -94,18 +94,15 @@ def evaluate_for_object_detection(config):
     result_path = session_path / 'result.csv'
 
     # Generate evaluation settings.
-    if config.eval_codec in ['none', 'surrogate']:
-        eval_settings = [(None, None)]
+    if ',' in config.eval_downscale:
+        eval_downscales = list(map(int, config.eval_downscale.split(',')))
     else:
-        if ',' in config.eval_downscale:
-            eval_downscales = list(map(int, config.eval_downscale.split(',')))
-        else:
-            eval_downscales = [int(config.eval_downscale)]
-        if ',' in config.eval_quality:
-            eval_qualities = list(map(int, config.eval_quality.split(',')))
-        else:
-            eval_qualities = [int(config.eval_quality)]
-        eval_settings = list(itertools.product(eval_downscales, eval_qualities))
+        eval_downscales = [int(config.eval_downscale)]
+    if ',' in config.eval_quality:
+        eval_qualities = list(map(int, config.eval_quality.split(',')))
+    else:
+        eval_qualities = [int(config.eval_quality)]
+    eval_settings = list(itertools.product(eval_downscales, eval_qualities))
 
     # Create or load result dataframe.
     if result_path.exists():

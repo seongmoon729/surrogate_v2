@@ -33,7 +33,7 @@ def build_session_path(config):
             session_path + f"_{config.lr_scheduler}_lr{config.learning_rate}")
     else:
         session_path = Path(
-            session_path + f"_{config.lr_scheduler}_{config.final_lr_rate}_lr{config.learning_rate}")
+            session_path + f"_{config.lr_scheduler}_lr{config.learning_rate}_{config.final_lr_rate}")
     return session_path
 
 

@@ -7,13 +7,15 @@ class Checkpoint:
         self.base_path = Path(path)
         self.base_path.mkdir(parents=True, exist_ok=True)
 
-    def save(self, network, optimizer=None, step=0, persistent_period=None):
+    def save(self, network, optimizer=None, scheduler=None, step=0, persistent_period=None):
         ckpt_path = self.base_path / f"checkpoint_{step}.pth"
 
         # Choose variables to save.
         target_objects = {'network': network.state_dict(), 'step': step}
         if optimizer:
             target_objects.update({'optimizer': optimizer.state_dict()})
+        if scheduler:
+            target_objects.update({'scheduler': scheduler.state_dict()})
 
         # Save.
         torch.save(target_objects, ckpt_path)
@@ -24,7 +26,7 @@ class Checkpoint:
             if self._get_step(old_ckpt_path) % persistent_period:
                 old_ckpt_path.unlink()
 
-    def load(self, network, optimizer=None, step=-1):
+    def load(self, network, optimizer=None, scheduler=None, step=-1):
         ckpt_paths = sorted(self.base_path.glob('*.pth'), key=self._get_step)
 
         if len(ckpt_paths):
@@ -42,6 +44,8 @@ class Checkpoint:
                 network.load_state_dict(target_ckpt['model'])
             if optimizer:
                 optimizer.load_state_dict(target_ckpt['optimizer'])
+            if scheduler:
+                scheduler.load_state_dict(scheduler['scheduler'])
             step = target_ckpt['step']
         else:
             step = 0

@@ -28,14 +28,14 @@ class Evaluator:
         session_path = Path(session_path)
         session_path.mkdir(parents=True, exist_ok=True)
         if surrogate_quality:
-            _, self.is_saved_session = utils.inspect_session_path(session_path)
+            _, self.is_saved_session, norm_layer = utils.inspect_session_path(session_path)
         else:
-            surrogate_quality, self.is_saved_session = utils.inspect_session_path(session_path)
+            surrogate_quality, self.is_saved_session, norm_layer = utils.inspect_session_path(session_path)
 
         # Build end-to-end network.
         cfg = utils.get_od_cfg(vision_task, vision_network)
         self.end2end_network = models.EndToEndNetwork(
-            surrogate_quality, vision_task, od_cfg=cfg)
+            surrogate_quality, vision_task, norm_layer, od_cfg=cfg)
 
         # Restore weights.
         if self.is_saved_session:

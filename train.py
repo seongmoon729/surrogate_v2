@@ -88,7 +88,7 @@ def _train_for_object_detection(config):
 
     # Build end-to-end model.
     end2end_network = models.EndToEndNetwork(
-        config.surrogate_quality, config.vision_task, od_cfg=cfg)
+        config.surrogate_quality, config.vision_task, config.filter_norm_layer, od_cfg=cfg)
 
     # Load on GPU.
     end2end_network.cuda()

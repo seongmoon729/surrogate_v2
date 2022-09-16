@@ -20,17 +20,18 @@ import codec_ops
 
 
 class EndToEndNetwork(nn.Module):
-    def __init__(self, surrogate_quality, vision_task, od_cfg=None, input_format='BGR'):
+    def __init__(self, surrogate_quality, vision_task, norm_layer='cn', od_cfg=None, input_format='BGR'):
         super().__init__()
         assert input_format in ['RGB', 'BGR']
         self.surrogate_quality = surrogate_quality
         self.vision_task = vision_task
+        self.norm_layer = norm_layer
         self.od_cfg = od_cfg
         self.input_format = input_format
 
         # Networks.
         self.surrogate_network = ca_zoo.mbt2018(self.surrogate_quality, pretrained=True)
-        self.filtering_network = FilteringNetwork(self.surrogate_network)
+        self.filtering_network = FilteringNetwork(self.surrogate_network, self.norm_layer)
         self.vision_network = VisionNetwork(self.vision_task, self.od_cfg)
 
         self.inference_aug = T.ResizeShortestEdge(
@@ -273,9 +274,10 @@ class VisionNetwork(nn.Module):
 
 
 class FilteringNetwork(nn.Module):
-    def __init__(self, surrogate_network):
+    def __init__(self, surrogate_network, norm_layer='cn'):
         super().__init__()
         self.surrogate_encoder = SurrogateEncoder(surrogate_network)
+        self.norm_layer = norm_layer
 
         # TODO: Is this module necessary??
         M, N = surrogate_network.M, surrogate_network.N
@@ -290,10 +292,10 @@ class FilteringNetwork(nn.Module):
         )
 
         self.filter = nn.Sequential(
-            FilteringBlock(19, 64),
-            FilteringBlock(64, 64),
-            FilteringBlock(64, 64),
-            FilteringBlock(64, 64),
+            FilteringBlock(19, 64, norm_layer=norm_layer),
+            FilteringBlock(64, 64, norm_layer=norm_layer),
+            FilteringBlock(64, 64, norm_layer=norm_layer),
+            FilteringBlock(64, 64, norm_layer=norm_layer),
             # nn.Conv2d(64, 3, kernel_size=3, stride=1, padding='same'),
             nn.Conv2d(64, 3, kernel_size=1, stride=1),
             nn.Tanh(),
@@ -335,17 +337,17 @@ class FilteringNetwork(nn.Module):
     
 
 class FilteringBlock(nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, out_channels, norm_layer='cn'):
         super().__init__()
+        assert norm_layer in ['bn', 'cn']
         self.conv1 = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding='same'),
-            # nn.BatchNorm2d(out_channels),
-            ChannelNorm2d(out_channels),
+            ChannelNorm2d(out_channels) if norm_layer == 'cn' else nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
         )
         self.conv2 = nn.Sequential(
             nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding='same'),
-            # nn.BatchNorm2d(out_channels),
+            ChannelNorm2d(out_channels) if norm_layer == 'cn' else nn.BatchNorm2d(out_channels),
             ChannelNorm2d(out_channels),
         )
         self.proj = None

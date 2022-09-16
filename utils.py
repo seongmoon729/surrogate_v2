@@ -47,8 +47,14 @@ def inspect_session_path(session_path):
 
     surrogate_quality = None
     if is_saved_session:
-        surrogate_quality = int(session_path.parent.name.split('_')[0][1:])
-    return surrogate_quality, is_saved_session
+        first_session_name = session_path.parent.name
+        infos = first_session_name.split('_')
+        surrogate_quality = int(infos[0][1:])
+        if len(infos) == 3 and 'bn' in infos:
+            norm_layer = 'bn'
+        else:
+            norm_layer = 'cn'
+    return surrogate_quality, is_saved_session, norm_layer
 
 
 def get_od_cfg(od_task, od_network):

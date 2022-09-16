@@ -41,6 +41,9 @@ def parse_args():
         "--surrogate_quality", "-sq", type=int, default=1,
         help="Quality of surrogate codec.")
     train_parser.add_argument(
+        "--filter_norm_layer", "-fnl", type=str, default='cn',
+        help="Normalization layer of filtering network.")
+    train_parser.add_argument(
         "--lmbda", "-ld", type=float, default=1.0,
         help="RD trade-off coefficient (R + ld * D).")
     train_parser.add_argument(

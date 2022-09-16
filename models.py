@@ -348,7 +348,6 @@ class FilteringBlock(nn.Module):
         self.conv2 = nn.Sequential(
             nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding='same'),
             ChannelNorm2d(out_channels) if norm_layer == 'cn' else nn.BatchNorm2d(out_channels),
-            ChannelNorm2d(out_channels),
         )
         self.proj = None
         if in_channels != out_channels:

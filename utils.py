@@ -22,18 +22,22 @@ def get_logger():
 def build_session_path(config):
     session_path = Path(config.vision_task)
     session_path /= config.vision_network
-    session_path /= (
-        f"q{config.surrogate_quality}_ld{config.lmbda}_{config.suffix}" if config.suffix
-        else f"q{config.surrogate_quality}_ld{config.lmbda}"
-    )
-    session_path /= f"s{config.steps}_bs{config.batch_size}_{config.optimizer}"
-    session_path = str(session_path)
-    if config.lr_scheduler == 'constant':
-        session_path = Path(
-            session_path + f"_{config.lr_scheduler}_lr{config.learning_rate}")
-    else:
-        session_path = Path(
-            session_path + f"_{config.lr_scheduler}_lr{config.learning_rate}_{config.final_lr_rate}")
+
+    first_session_name = f"q{config.surrogate_quality}_ld{config.lmbda}"
+    if config.filter_norm_layer == 'bn':
+        first_session_name += '_bn'
+    if config.suffix:
+        first_session_name += f"_{config.suffix}"
+
+    second_session_name = (
+        f"s{config.steps}_bs{config.batch_size}_{config.optimizer}"
+        f"_lr{config.learning_rate}_{config.lr_scheduler}")
+    if config.lr_scheduler == 'exponential':
+        second_session_name += f"_{config.final_lr_rate}"
+
+    session_path /= first_session_name
+    session_path /= second_session_name
+
     return session_path
 
 

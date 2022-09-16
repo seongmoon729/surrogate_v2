@@ -138,8 +138,10 @@ def parse_args():
     if args.command is None:
         parser.print_usage()
         sys.exit(2)
-    if args.command == 'evaluate' and args.eval_codec not in ['none', 'surrogate']:
-        if args.eval_codec == 'jpeg':
+    if args.command == 'evaluate' and args.eval_codec not in ['none']:
+        if args.eval_codec == 'surrogate':
+            qualities = [1, 2, 3, 4, 5, 6, 7, 8]
+        elif args.eval_codec == 'jpeg':
             qualities = JPEG_QUALITIES
         elif args.eval_codec == 'webp':
             qualities = WEBP_QUALITIES
@@ -148,7 +150,7 @@ def parse_args():
         elif args.eval_codec == 'vvenc':
             qualities = VVENC_QUALITIES
         else:
-            raise ValueError(f"'{args.eval_codec}' is wrong codec, available: {CODEC_LIST}")
+            raise ValueError(f"'{args.eval_codec}' is wrong codec, available: {['none', 'surrogate'] + CODEC_LIST}")
         if args.eval_quality is None:
             assert False, f"Please provide '--eval_quality' (-eq), for {args.eval_codec}, available: {qualities}."
 

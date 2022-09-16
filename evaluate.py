@@ -17,7 +17,7 @@ import oid_mask_encoding
 
 
 class Evaluator:
-    def __init__(self, vision_task, vision_network, session_path, session_step, coco_classes):
+    def __init__(self, vision_task, vision_network, session_path, session_step, coco_classes, surrogate_quality=None):
         warnings.filterwarnings('ignore', category=UserWarning)
         self.vision_task = vision_task
         self.vision_network = vision_network
@@ -27,7 +27,10 @@ class Evaluator:
 
         session_path = Path(session_path)
         session_path.mkdir(parents=True, exist_ok=True)
-        surrogate_quality, self.is_saved_session = utils.inspect_session_path(session_path)
+        if surrogate_quality:
+            _, self.is_saved_session = utils.inspect_session_path(session_path)
+        else:
+            surrogate_quality, self.is_saved_session = utils.inspect_session_path(session_path)
 
         # Build end-to-end network.
         cfg = utils.get_od_cfg(vision_task, vision_network)
@@ -85,8 +88,9 @@ class Evaluator:
 def evaluate_for_object_detection(config):
     logger = utils.get_logger()
     logger.info(f"Evaluate '{config.session_path}' session with step size {config.session_step}.")
-    logger.info(f"Task : {config.vision_task}")
+    logger.info(f"Task    : {config.vision_task}")
     logger.info(f"Network : {config.vision_network}")
+    logger.info(f"Codec   : {config.eval_codec}")
     ray.init()
 
     session_path = Path(config.session_path)
@@ -142,18 +146,21 @@ def evaluate_for_object_detection(config):
     n_gpu = len(config.gpu.split(',')) if ',' in config.gpu else 1
     n_eval = config.num_parallel_eval_per_gpu * n_gpu
     eval_builder = ray.remote(num_gpus=(1 / config.num_parallel_eval_per_gpu))(Evaluator)
-    eval_init_args = (
-        config.vision_task,
-        config.vision_network,
-        session_path,
-        config.session_step,
-        coco_classes)
 
     #TODO. Memory growth issue (~ 174GB).
     logger.info("Start evaluation loop.")
     total = len(input_files) * len(eval_settings)
     with tqdm(total=total, dynamic_ncols=True, smoothing=0.1) as pbar:
         for downscale, quality in eval_settings:
+            eval_init_args = (
+                config.vision_task,
+                config.vision_network,
+                session_path,
+                config.session_step,
+                coco_classes)
+            if config.eval_codec == 'surrogate':
+                eval_init_args += (quality,)
+                
             # Make/set evaluators and their inputs.
             evaluators = [eval_builder.remote(*eval_init_args) for _ in range(n_eval)]
             input_iter = iter(input_files)

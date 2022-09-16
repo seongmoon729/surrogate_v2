@@ -41,7 +41,7 @@ def inspect_session_path(session_path):
     session_path = Path(session_path)
     is_saved_session = 'base' not in session_path.name
 
-    surrogate_quality = 1  # dummy
+    surrogate_quality = None
     if is_saved_session:
         surrogate_quality = int(session_path.parent.name.split('_')[0][1:])
     return surrogate_quality, is_saved_session

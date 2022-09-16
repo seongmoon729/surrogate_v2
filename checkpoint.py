@@ -51,8 +51,8 @@ class Checkpoint:
             step = 0
         return step
 
-    def resume(self, network, optimizer, step=-1):
-        step = self.load(network, optimizer, step)
+    def resume(self, network, optimizer, scheduler, step=-1):
+        step = self.load(network, optimizer, scheduler, step)
         return step
 
     def _get_step(self, ckpt_path):

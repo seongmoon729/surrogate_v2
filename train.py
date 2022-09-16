@@ -113,7 +113,7 @@ def _train_for_object_detection(config):
     output_path = Path('out') / session_path
     last_step = 0
     ckpt = checkpoint.Checkpoint(output_path)
-    last_step = ckpt.resume(end2end_network.filtering_network, optimizer)
+    last_step = ckpt.resume(end2end_network.filtering_network, optimizer, lr_scheduler)
     if comm.is_main_process():
         if last_step:
             logger.info(f"Resume training. Last step is {last_step}.")
@@ -171,6 +171,7 @@ def _train_for_object_detection(config):
                 ckpt.save(
                     target_network,
                     optimizer,
+                    lr_scheduler,
                     step=step,
                     persistent_period=config.checkpoint_period)
 

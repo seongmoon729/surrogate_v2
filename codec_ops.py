@@ -38,14 +38,6 @@ def codec_fn(x, codec, quality, downscale=0):
             downscale: a parameter to control downscaling level
     """
     assert codec in CODEC_LIST
-    if codec == 'jpeg':
-        assert quality in JPEG_QUALITIES, f"Choose one of {JPEG_QUALITIES}, lower is better."
-    elif codec == 'webp':
-        assert quality in WEBP_QUALITIES, f"Choose one of {WEBP_QUALITIES}, higher is better."
-    elif codec == 'vtm':
-        assert quality in VTM_QUALITIES, f"Choose one of {VTM_QUALITIES}, lower is better."
-    elif codec == 'vvenc':
-        assert quality in VVENC_QUALITIES, f"Choose one of {VVENC_QUALITIES}, lower is better."
 
     x = x.copy()
     x *= 255.                   # Denormalize

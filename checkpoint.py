@@ -45,7 +45,7 @@ class Checkpoint:
             if optimizer:
                 optimizer.load_state_dict(target_ckpt['optimizer'])
             if scheduler:
-                scheduler.load_state_dict(scheduler['scheduler'])
+                scheduler.load_state_dict(target_ckpt['scheduler'])
             step = target_ckpt['step']
         else:
             step = 0

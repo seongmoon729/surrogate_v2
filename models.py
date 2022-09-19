@@ -129,11 +129,10 @@ class EndToEndNetwork(nn.Module):
                     filtered_image_ = torch.as_tensor(filtered_image, device=self.device)
                     filtered_image_, (h, w) = self.filtering_network.preprocess(filtered_image_)
                     codec_out = self.surrogate_network(filtered_image_[None, ...])
+                    # Unpad & cal
                     reconstructed_image, bpp = (
                         self.filtering_network.postprocess(codec_out['x_hat'][0], (h, w)),
                         self.compute_bpp(codec_out).item())
-                    # Unpad.
-                    reconstructed_image = self.filtering_network.postprocess(reconstructed_image, (h, w))
                     reconstructed_image = reconstructed_image.detach().cpu().numpy()
                 else:
                     # (c). conventional codec.

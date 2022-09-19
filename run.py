@@ -102,6 +102,9 @@ def parse_args():
             f"   * vtm   (0-63): {','.join(map(str, VTM_QUALITIES)):>17} <- lower is better\n"
             f"   * vvenc (0-63): {','.join(map(str, VVENC_QUALITIES)):>17} <- lower is better\n")
     eval_parser.add_argument(
+        "--allow_various_qualities", "-avq", action='store_true',
+        help="Allow user can evaluate the model with various qualities.")
+    eval_parser.add_argument(
         "--eval_downscale", "-ed", type=str, default='0',
         help="Image downscale level before the encoding (comma separated).\n"
             f"   * levels: {','.join(map(str, DS_LEVELS))}")
@@ -141,7 +144,9 @@ def parse_args():
     if args.command is None:
         parser.print_usage()
         sys.exit(2)
-    if args.command == 'evaluate' and args.eval_codec not in ['none']:
+    if (args.command == 'evaluate' and
+        args.eval_codec not in ['none'] and
+        not args.allow_various_qualities):
         if args.eval_codec == 'surrogate':
             qualities = [1, 2, 3, 4, 5, 6, 7, 8]
         elif args.eval_codec == 'jpeg':

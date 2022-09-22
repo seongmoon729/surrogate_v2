@@ -46,6 +46,7 @@ def inspect_session_path(session_path):
     is_saved_session = 'base' not in session_path.name
 
     surrogate_quality = None
+    norm_layer = 'cn'  # dummy
     if is_saved_session:
         first_session_name = session_path.parent.name
         infos = first_session_name.split('_')

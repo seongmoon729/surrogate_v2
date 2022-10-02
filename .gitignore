@@ -6,6 +6,8 @@ playground.ipynb
 
 out/
 
+samples/
+
 *.cfg
 
 *.png

@@ -1,4 +1,3 @@
-from statistics import variance
 import ray
 import numpy as np
 
@@ -13,8 +12,6 @@ from detectron2.utils.events import EventStorage
 from detectron2.modeling.meta_arch.rcnn import GeneralizedRCNN
 
 import compressai.zoo as ca_zoo
-from compressai.layers import GDN
-from compressai.models.utils import deconv
 
 import codec_ops
 
@@ -31,7 +28,7 @@ class EndToEndNetwork(nn.Module):
 
         # Networks.
         self.surrogate_network = ca_zoo.mbt2018(self.surrogate_quality, pretrained=True)
-        self.filtering_network = FilteringNetwork(self.surrogate_network, self.norm_layer)
+        self.filtering_network = FilteringNetwork(self.norm_layer)
         self.vision_network = VisionNetwork(self.vision_task, self.od_cfg)
 
         self.inference_aug = T.ResizeShortestEdge(
@@ -273,38 +270,22 @@ class VisionNetwork(nn.Module):
 
 
 class FilteringNetwork(nn.Module):
-    def __init__(self, surrogate_network, norm_layer='cn'):
+    def __init__(self, norm_layer='cn'):
         super().__init__()
-        self.surrogate_encoder = SurrogateEncoder(surrogate_network)
         self.norm_layer = norm_layer
 
-        # TODO: Is this module necessary??
-        M, N = surrogate_network.M, surrogate_network.N
-        self.pixel_rate_estimator = nn.Sequential(
-            deconv(M, N, kernel_size=5, stride=2),
-            GDN(N, inverse=True),
-            deconv(N, N // 2, kernel_size=5, stride=2),
-            GDN(N // 2, inverse=True),
-            deconv(N // 2, N // 4, kernel_size=5, stride=2),
-            GDN(N // 4, inverse=True),
-            deconv(N // 4, 16, kernel_size=5, stride=2),
-        )
-
         self.filter = nn.Sequential(
-            FilteringBlock(19, 64, norm_layer=norm_layer),
-            FilteringBlock(64, 64, norm_layer=norm_layer),
-            FilteringBlock(64, 64, norm_layer=norm_layer),
-            FilteringBlock(64, 64, norm_layer=norm_layer),
-            # nn.Conv2d(64, 3, kernel_size=3, stride=1, padding='same'),
-            nn.Conv2d(64, 3, kernel_size=1, stride=1),
+            FilteringBlock( 3, 16, norm_layer=norm_layer),
+            FilteringBlock(16, 32, norm_layer=norm_layer),
+            FilteringBlock(32, 64, norm_layer=norm_layer),
+            FilteringBlock(64, 32, norm_layer=norm_layer),
+            FilteringBlock(32, 16, norm_layer=norm_layer),
+            nn.Conv2d(16, 3, kernel_size=1, stride=1),
             nn.Tanh(),
         )
 
     def forward(self, x):
-        out = self.surrogate_encoder(x)
-        out = self.pixel_rate_estimator(out)
-        out = torch.cat([x, out], axis=1)
-        out = self.filter(out)
+        out = self.filter(x)
         out = out + x
         out = torch.clip(out, 0., 1.)
         return out
@@ -339,55 +320,25 @@ class FilteringBlock(nn.Module):
     def __init__(self, in_channels, out_channels, norm_layer='cn'):
         super().__init__()
         assert norm_layer in ['bn', 'cn']
-        self.conv1 = nn.Sequential(
+        self.conv = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding='same'),
             ChannelNorm2d(out_channels) if norm_layer == 'cn' else nn.BatchNorm2d(out_channels),
             nn.ReLU(inplace=True),
         )
-        self.conv2 = nn.Sequential(
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, stride=1, padding='same'),
-            ChannelNorm2d(out_channels) if norm_layer == 'cn' else nn.BatchNorm2d(out_channels),
-        )
+        self.se_layer = SELayer(out_channels, reduction_ratio=8)
         self.proj = None
         if in_channels != out_channels:
             self.proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1)
         self.relu = nn.ReLU(inplace=True)
         
     def forward(self, x):
-        out = self.conv1(x)
-        out = self.conv2(out)
+        out = self.conv(x)
+        out = self.se_layer(out)
         if self.proj:
             x = self.proj(x)
         out = out + x
         out = self.relu(out)
         return out
-
-
-class SurrogateEncoder(nn.Module):
-    def __init__(self, surrogate_network):
-        super().__init__()
-        self.g_a = surrogate_network.g_a
-        self.h_a = surrogate_network.h_a
-        self.entropy_bottleneck = surrogate_network.entropy_bottleneck
-        self.h_s = surrogate_network.h_s
-        self.gaussian_conditional = surrogate_network.gaussian_conditional
-        self.context_prediction = surrogate_network.context_prediction
-        self.entropy_parameters = surrogate_network.entropy_parameters
-
-    def forward(self, x):
-        y = self.g_a(x)
-        z = self.h_a(y)
-        z_hat, _ = self.entropy_bottleneck(z)
-        params = self.h_s(z_hat)
-
-        y_hat = self.gaussian_conditional.quantize(y, 'dequantize')
-        ctx_params = self.context_prediction(y_hat)
-        gaussian_params = self.entropy_parameters(
-            torch.cat((params, ctx_params), dim=1)
-        )
-        scales_hat, means_hat = gaussian_params.chunk(2, 1)
-        _, y_likelihoods = self.gaussian_conditional(y, scales_hat, means=means_hat)
-        return y_likelihoods
 
 
 class ChannelNorm2d(nn.Module):
@@ -416,6 +367,26 @@ class ChannelNorm2d(nn.Module):
         x = (x - mean) / (torch.sqrt(variance) + self.eps)
         x = x * self.gamma[None, :, None, None] + self.beta[None, :, None, None]
         return x
+
+
+class SELayer(nn.Module):
+    def __init__(self, in_channels, reduction_ratio):
+        super().__init__()
+        self.in_channels = in_channels
+        self.reduction_ratio = reduction_ratio
+
+        self.se_module = nn.Sequential(
+            nn.Linear(in_channels, in_channels // reduction_ratio),
+            nn.ReLU(),
+            nn.Linear(in_channels // reduction_ratio, in_channels),
+            nn.Sigmoid(),
+        )
+
+    def forward(self, x):
+        x_pooled = torch.mean(x, dim=(2, 3), keepdim=False)
+        scale = self.se_module(x_pooled)[:, :, None, None]
+        out = x * scale
+        return out
 
 
 def build_object_detection_model(cfg):

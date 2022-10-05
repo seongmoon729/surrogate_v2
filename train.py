@@ -7,6 +7,7 @@ import torch
 import torch.optim as optim
 import torch.distributed as dist
 import torch.multiprocessing as mp
+from torch.profiler import profile, schedule, tensorboard_trace_handler
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn.parallel import DistributedDataParallel
 import detectron2.utils.comm as comm
@@ -79,7 +80,7 @@ def _train_for_object_detection(config):
     logger = utils.get_logger()
 
     # Set session path (path for artifacts of training).
-    session_path = utils.build_session_path(config)
+    session_path = 'out' / utils.build_session_path(config)
     if comm.is_main_process():
         logger.info(f"Start training script for '{session_path}'.")
 
@@ -98,9 +99,12 @@ def _train_for_object_detection(config):
 
     # Build optimizer.
     target_params = (
-        list(end2end_network.filtering_network.filter.parameters()) +
-        list(end2end_network.filtering_network.pixel_rate_estimator.parameters())
+        list(end2end_network.filtering_network.filter.parameters())
     )
+    # target_params = (
+    #     list(end2end_network.filtering_network.filter.parameters()) +
+    #     list(end2end_network.filtering_network.pixel_rate_estimator.parameters())
+    # )
     optimizer, lr_scheduler = _create_optimizer(
         target_params,
         config.optimizer,
@@ -110,9 +114,8 @@ def _train_for_object_detection(config):
         config.final_lr_rate)
 
     # Search checkpoint files & resume.
-    output_path = Path('out') / session_path
     last_step = 0
-    ckpt = checkpoint.Checkpoint(output_path)
+    ckpt = checkpoint.Checkpoint(session_path)
     last_step = ckpt.resume(end2end_network.filtering_network, optimizer, lr_scheduler)
     if comm.is_main_process():
         if last_step:
@@ -132,7 +135,7 @@ def _train_for_object_detection(config):
 
     # Create summary writer.
     if comm.is_main_process():
-        writer = SummaryWriter(output_path)
+        writer = SummaryWriter(session_path)
 
     # Build data loader.
     cfg.SOLVER.IMS_PER_BATCH = config.batch_size
@@ -142,6 +145,16 @@ def _train_for_object_detection(config):
     logger.info("Start training.")
     start_step = last_step + 1
     end_step = config.steps
+
+    # Profiler
+    prof = profile(
+        schedule=schedule(wait=1, warmup=1, active=3, repeat=2),
+        on_trace_ready=tensorboard_trace_handler(session_path / 'profile.log'),
+        record_shapes=True,
+        profile_memory=True,
+        with_stack=True)
+    prof.start()
+
     for data, step in zip(dataloader, range(start_step, end_step + 1)):
         losses = end2end_network(data)
         loss_rd = losses['r'] + config.lmbda * losses['d']
@@ -174,6 +187,8 @@ def _train_for_object_detection(config):
                     lr_scheduler,
                     step=step,
                     persistent_period=config.checkpoint_period)
+        prof.step()
+    prof.stop()
 
 
 def _create_optimizer(parameters, optim_name, scheduler_name, initial_lr, total_steps, final_rate=.1):

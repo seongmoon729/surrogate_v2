@@ -93,3 +93,6 @@ RUN pip install setuptools==59.5.0
 
 # Set working directory.
 WORKDIR /surrogate_v2
+
+# Copy python files.
+COPY *.py .

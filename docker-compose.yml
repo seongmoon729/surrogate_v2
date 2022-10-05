@@ -3,7 +3,7 @@
 version: "3.9"
 
 services:
-  main:
+  dev:
     build:
       context: .
       dockerfile: Dockerfile
@@ -18,7 +18,24 @@ services:
       memlock: -1
       stack: 67108864
     volumes:
-      - ./:/surrogate_v2
-      - /data4/:/data/  # for symbolic links.
+      - ./:/surrogate_v2/
+      - /data1/:/data/  # for symbolic links.
+      - ${HOME}/container_root/:/root/
+    tty: true
+  main:
+    image: ${USER}/surrogate:v2
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+    shm_size: 256gb
+    ulimits:
+      memlock: -1
+      stack: 67108864
+    volumes:
+      - ./data/:/surrogate_v2/data/
+      - ./out/:/surrogate_v2/out/
+      - /data1/:/data/  # for symbolic links.
       - ${HOME}/container_root/:/root/
     tty: true

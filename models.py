@@ -17,25 +17,25 @@ import codec_ops
 
 
 class EndToEndNetwork(nn.Module):
-    def __init__(self, surrogate_quality, vision_task, norm_layer='cn', od_cfg=None, input_format='BGR'):
+    def __init__(self, surrogate_quality, vision_task, normalization='cn', od_cfg=None, input_format='BGR'):
         super().__init__()
         assert input_format in ['RGB', 'BGR']
         self.surrogate_quality = surrogate_quality
         self.vision_task = vision_task
-        self.norm_layer = norm_layer
+        self.normalization = normalization
         self.od_cfg = od_cfg
         self.input_format = input_format
 
         # Networks.
         self.surrogate_network = ca_zoo.mbt2018(self.surrogate_quality, pretrained=True)
-        self.filtering_network = FilteringNetwork(self.norm_layer)
+        self.filtering_network = FilteringNetwork(self.normalization)
         self.vision_network = VisionNetwork(self.vision_task, self.od_cfg)
 
         self.inference_aug = T.ResizeShortestEdge(
             [od_cfg.INPUT.MIN_SIZE_TEST, od_cfg.INPUT.MIN_SIZE_TEST], od_cfg.INPUT.MAX_SIZE_TEST
         )
 
-    def forward(self, inputs, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=False):
+    def forward(self, inputs, lmbdas, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=False):
         """ Forward method. 
             Pre-fixed arguments with 'eval' are only for inference mode (.eval())
         """
@@ -43,14 +43,15 @@ class EndToEndNetwork(nn.Module):
             pass
         else:
             if not self.training:
-                return self.inference(inputs, eval_codec, eval_quality, eval_downscale, eval_filtering)
+                return self.inference(inputs, lmbdas, eval_codec, eval_quality, eval_downscale, eval_filtering)
 
             # Convert input format to RGB & batch the images after applying padding.
             images = self.preprocess_image_for_od(inputs)
 
             # Normalize & filter.
             images.tensor, (h, w) = self.filtering_network.preprocess(images.tensor)
-            images.tensor = self.filtering_network(images.tensor / 255.)
+            lmbdas = torch.as_tensor(lmbdas, dtype=torch.float32, device=images.tensor.device).reshape(len(lmbdas), 1)
+            images.tensor = self.filtering_network(images.tensor / 255., lmbdas)
 
             # Apply codec.
             codec_out = self.surrogate_network(images.tensor)
@@ -73,6 +74,8 @@ class EndToEndNetwork(nn.Module):
 
             # Internally normalize input & compute losses for object detection.
             losses_d = self.vision_network(images, gt_instances, proposals)
+            # for k, v in losses_d:
+            #     print(v.shape)
             loss_d = sum(losses_d.values())
 
             losses = dict()
@@ -80,7 +83,7 @@ class EndToEndNetwork(nn.Module):
             losses['d'] = loss_d
             return losses
 
-    def inference(self, original_image, codec, quality, downscale, filtering):
+    def inference(self, original_image, lmbda, codec, quality, downscale, filtering):
         """ This method processes only one image (not batched!). """
         assert not self.training
         assert isinstance(original_image, np.ndarray)
@@ -109,7 +112,8 @@ class EndToEndNetwork(nn.Module):
                 # 1. Apply filtering or not.
                 if filtering:
                     padded_image, (h, w) = self.filtering_network.preprocess(original_image)
-                    filtered_image = self.filtering_network(padded_image[None, ...])[0]
+                    lmbda = torch.as_tensor(lmbda, dtype=torch.float32, device=padded_image.device).reshape(1, 1)
+                    filtered_image = self.filtering_network(padded_image[None, ...], lmbda)[0]
                     filtered_image = self.filtering_network.postprocess(filtered_image, (h, w))
                 else:
                     filtered_image = original_image
@@ -270,22 +274,39 @@ class VisionNetwork(nn.Module):
 
 
 class FilteringNetwork(nn.Module):
-    def __init__(self, norm_layer='cn'):
+    def __init__(self, normalization='cn'):
         super().__init__()
-        self.norm_layer = norm_layer
+        self.normalization = normalization
 
-        self.filter = nn.Sequential(
-            FilteringBlock( 3, 16, norm_layer=norm_layer),
-            FilteringBlock(16, 32, norm_layer=norm_layer),
-            FilteringBlock(32, 64, norm_layer=norm_layer),
-            FilteringBlock(64, 32, norm_layer=norm_layer),
-            FilteringBlock(32, 16, norm_layer=norm_layer),
+        fc_channel_config = [
+            ( 1, 16), ( 1, 32), ( 1, 64),
+            ( 1, 32), ( 1, 16)
+        ]
+
+        conv_channel_config = [
+            ( 3, 16), (16, 32), (32, 64),
+            (64, 32), (32, 16)
+        ]
+
+        self.modulators = nn.ModuleList([
+            FeatureModulator(in_channels, out_channels)
+            for in_channels, out_channels in fc_channel_config
+        ])
+        self.filtering_blocks = nn.ModuleList([
+            FilteringBlock(in_channels, out_channels, normalization)
+            for in_channels, out_channels in conv_channel_config
+        ])
+        self.last_conv = nn.Sequential(
             nn.Conv2d(16, 3, kernel_size=1, stride=1),
-            nn.Tanh(),
+            nn.Tanh()
         )
 
-    def forward(self, x):
-        out = self.filter(x)
+    def forward(self, x, ld):
+        out = x
+        for m, fb in zip(self.modulators, self.filtering_blocks):
+            gamma, beta = m(ld)
+            out = fb(out, gamma=gamma, beta=beta)
+        out = self.last_conv(out)
         out = out + x
         out = torch.clip(out, 0., 1.)
         return out
@@ -317,13 +338,11 @@ class FilteringNetwork(nn.Module):
     
 
 class FilteringBlock(nn.Module):
-    def __init__(self, in_channels, out_channels, norm_layer='cn'):
+    def __init__(self, in_channels, out_channels, normalization):
         super().__init__()
-        assert norm_layer in ['bn', 'cn']
-        self.conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, stride=1, padding='same'),
-            ChannelNorm2d(out_channels) if norm_layer == 'cn' else nn.BatchNorm2d(out_channels),
-            nn.ReLU(inplace=True),
+        self.conv = FMConv2dBlock(
+            in_channels, out_channels, kernel_size=3, stride=1,
+            padding='same', normalization=normalization
         )
         self.se_layer = SELayer(out_channels, reduction_ratio=8)
         self.proj = None
@@ -331,8 +350,8 @@ class FilteringBlock(nn.Module):
             self.proj = nn.Conv2d(in_channels, out_channels, kernel_size=1, stride=1)
         self.relu = nn.ReLU(inplace=True)
         
-    def forward(self, x):
-        out = self.conv(x)
+    def forward(self, x, gamma=None, beta=None):
+        out = self.conv(x, gamma, beta)
         out = self.se_layer(out)
         if self.proj:
             x = self.proj(x)
@@ -387,6 +406,56 @@ class SELayer(nn.Module):
         scale = self.se_module(x_pooled)[:, :, None, None]
         out = x * scale
         return out
+
+
+class FeatureModulator(nn.Module):
+    def __init__(self, in_channels, out_channels):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+
+        self.fc_g = nn.Sequential(
+            nn.Linear(self.in_channels, self.out_channels),
+            nn.Softplus()
+        )
+        self.fc_b = nn.Linear(self.in_channels, self.out_channels)
+
+    def forward(self, x):
+        gamma = self.fc_g(x)
+        beta  = self.fc_b(x)
+        return gamma, beta
+
+
+class FMConv2dBlock(nn.Module):
+    """ Feature Modulated 2D Convolutional Block """
+    def __init__(self, in_channels, out_channels, kernel_size, stride=1, padding=0, normalization='cn'):
+        super().__init__()
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+        self.normalization = normalization
+
+        assert normalization in ['bn', 'cn']
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(
+                self.in_channels,
+                self.out_channels,
+                kernel_size=self.kernel_size,
+                stride=self.stride,
+                padding=self.padding
+            ),
+            ChannelNorm2d(out_channels) if self.normalization == 'cn' else nn.BatchNorm2d(out_channels),
+            nn.ReLU(inplace=True),
+        )
+
+    def forward(self, x, gamma=None, beta=None):
+        x = self.conv(x)
+        if (gamma is not None) and (beta is not None):
+            x = x * gamma[:, :, None, None] + beta[:, :, None, None]
+        return x
 
 
 def build_object_detection_model(cfg):

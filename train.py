@@ -1,6 +1,6 @@
 import os
 import sys
-from pathlib import Path
+import random
 from datetime import timedelta
 
 import torch
@@ -84,6 +84,12 @@ def _train_for_object_detection(config):
     if comm.is_main_process():
         logger.info(f"Start training script for '{session_path}'.")
 
+    # Parse lambdas.
+    if ',' in config.lmbda:
+        lmbda_list = list(map(float, config.lmbda.split(',')))
+    else:
+        lmbda_list = [float(config.lmbda)]
+
     # Get detectron2 config data.
     cfg = utils.get_od_cfg(config.vision_task, config.vision_network)
 
@@ -98,13 +104,7 @@ def _train_for_object_detection(config):
     end2end_network.train()
 
     # Build optimizer.
-    target_params = (
-        list(end2end_network.filtering_network.filter.parameters())
-    )
-    # target_params = (
-    #     list(end2end_network.filtering_network.filter.parameters()) +
-    #     list(end2end_network.filtering_network.pixel_rate_estimator.parameters())
-    # )
+    target_params = end2end_network.filtering_network.parameters()
     optimizer, lr_scheduler = _create_optimizer(
         target_params,
         config.optimizer,
@@ -156,7 +156,8 @@ def _train_for_object_detection(config):
     prof.start()
 
     for data, step in zip(dataloader, range(start_step, end_step + 1)):
-        losses = end2end_network(data)
+        lmbdas = random.choices(lmbda_list, k=(config.batch_size // comm.get_world_size()))
+        losses = end2end_network(data, lmbdas)
         loss_rd = losses['r'] + config.lmbda * losses['d']
         
         optimizer.zero_grad()
@@ -166,13 +167,13 @@ def _train_for_object_detection(config):
 
         # Calculate reduced losses.
         losses = {k: v.item() for k, v in comm.reduce_dict(losses).items()}
-        loss_rd = losses['r'] + config.lmbda * losses['d']
+        # loss_rd = losses['r'] + config.lmbda * losses['d']
 
         # Write on tensorboard.
         if comm.is_main_process():
             writer.add_scalar('train/loss/rate', losses['r'], step)
             writer.add_scalar('train/loss/distortion', losses['d'], step)
-            writer.add_scalar('train/loss/combined', loss_rd, step)
+            # writer.add_scalar('train/loss/combined', loss_rd, step)
             writer.add_scalar('train/lr', lr_scheduler.get_last_lr()[0], step)
 
             if step % 100 == 0:

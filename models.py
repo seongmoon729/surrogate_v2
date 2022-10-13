@@ -50,15 +50,18 @@ class EndToEndNetwork(nn.Module):
 
             # Normalize & filter.
             images.tensor, (h, w) = self.filtering_network.preprocess(images.tensor)
-            lmbdas = torch.as_tensor(lmbdas, dtype=torch.float32, device=images.tensor.device).reshape(len(lmbdas), 1)
-            images.tensor = self.filtering_network(images.tensor / 255., lmbdas)
+            lmbdas = torch.as_tensor(lmbdas, dtype=torch.float32, device=images.tensor.device)
+            images.tensor = self.filtering_network(images.tensor / 255., lmbdas.reshape(len(lmbdas), 1))
 
             # Apply codec.
             codec_out = self.surrogate_network(images.tensor)
             images.tensor = self.filtering_network.postprocess(codec_out['x_hat'], (h, w))
 
             # Compute averaged bit rate & use it as rate loss.
-            loss_r = torch.mean(self.compute_bpp(codec_out))
+            # loss_r = torch.mean(self.compute_bpp(codec_out))
+            loss_r = self.compute_bpp(codec_out)
+            loss_r = lmbdas * loss_r
+            loss_r = torch.mean(loss_r)
 
             # Convert RGB to BGR & denormalize.
             images.tensor = images.tensor[:, [2, 1, 0], :, :] * 255.
@@ -74,8 +77,7 @@ class EndToEndNetwork(nn.Module):
 
             # Internally normalize input & compute losses for object detection.
             losses_d = self.vision_network(images, gt_instances, proposals)
-            # for k, v in losses_d:
-            #     print(v.shape)
+            
             loss_d = sum(losses_d.values())
 
             losses = dict()

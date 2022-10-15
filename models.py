@@ -29,6 +29,16 @@ class EndToEndNetwork(nn.Module):
         self.od_cfg = od_cfg
         self.input_format = input_format
 
+        self.filter = nn.Sequential(
+                FilteringBlock(3, 64, norm_layer=norm_layer),
+                FilteringBlock(64, 64, norm_layer=norm_layer),
+                FilteringBlock(64, 64, norm_layer=norm_layer),
+                FilteringBlock(64, 64, norm_layer=norm_layer),
+                # nn.Conv2d(64, 3, kernel_size=3, stride=1, padding='same'),
+                nn.Conv2d(64, 3, kernel_size=1, stride=1),
+                nn.Tanh(),
+            )
+
         # Networks.
         self.surrogate_network = ca_zoo.mbt2018(self.surrogate_quality, pretrained=True)
         self.filtering_network = FilteringNetwork(self.surrogate_network, self.norm_layer)
@@ -57,6 +67,13 @@ class EndToEndNetwork(nn.Module):
 
             # Apply codec.
             codec_out = self.surrogate_network(images.tensor)
+
+            # post filtering (w/o encoder, only filter)
+            filter_out = self.filter(codec_out['x_hat'])
+            codec_out['x_hat'] = codec_out['x_hat'] + filter_out
+            codec_out['x_hat'] = torch.clip(codec_out['x_hat'], 0., 1.)
+
+
             images.tensor = self.filtering_network.postprocess(codec_out['x_hat'], (h, w))
 
             # Compute averaged bit rate & use it as rate loss.
@@ -129,10 +146,17 @@ class EndToEndNetwork(nn.Module):
                     filtered_image_ = torch.as_tensor(filtered_image, device=self.device)
                     filtered_image_, (h, w) = self.filtering_network.preprocess(filtered_image_)
                     codec_out = self.surrogate_network(filtered_image_[None, ...])
+                    
+                    # post filtering (w/o encoder, only filter)
+                    post_filter_out = self.filter(codec_out['x_hat'])[0]
+                    reconstructed_image = codec_out['x_hat'][0] + post_filter_out
+                    reconstructed_image = torch.clip(reconstructed_image, 0., 1.)
+                    
                     # Unpad & cal
                     reconstructed_image, bpp = (
-                        self.filtering_network.postprocess(codec_out['x_hat'][0], (h, w)),
+                        self.filtering_network.postprocess(reconstructed_image, (h, w)),
                         self.compute_bpp(codec_out).item())
+                    
                     reconstructed_image = reconstructed_image.detach().cpu().numpy()
                 else:
                     # (c). conventional codec.
@@ -141,7 +165,14 @@ class EndToEndNetwork(nn.Module):
                         codec=codec,
                         quality=quality,
                         downscale=downscale))
-
+                    
+                    reconstructed_image = torch.as_tensor(reconstructed_image, device=self.device)
+                    # post filtering (w/o encoder, only filter)
+                    post_filter_out = self.filter(reconstructed_image[None, ...])[0]
+                    reconstructed_image = reconstructed_image + post_filter_out
+                    reconstructed_image = torch.clip(reconstructed_image, 0., 1.)           
+                    reconstructed_image = reconstructed_image.detach().cpu().numpy()
+                    
                 # Convert reconstructed image format to (H, W, C) & denormalize.
                 od_input_image = reconstructed_image.transpose(1, 2, 0) * 255.
 

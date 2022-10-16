@@ -147,13 +147,13 @@ def _train_for_object_detection(config):
     end_step = config.steps
 
     # Profiler
-    prof = profile(
-        schedule=schedule(wait=1, warmup=1, active=3, repeat=2),
-        on_trace_ready=tensorboard_trace_handler(session_path / 'profile.log'),
-        record_shapes=True,
-        profile_memory=True,
-        with_stack=True)
-    prof.start()
+    # prof = profile(
+    #     schedule=schedule(wait=1, warmup=1, active=3, repeat=2),
+    #     on_trace_ready=tensorboard_trace_handler(session_path / 'profile.log'),
+    #     record_shapes=True,
+    #     profile_memory=True,
+    #     with_stack=True)
+    # prof.start()
 
     for data, step in zip(dataloader, range(start_step, end_step + 1)):
         losses = end2end_network(data)
@@ -187,8 +187,8 @@ def _train_for_object_detection(config):
                     lr_scheduler,
                     step=step,
                     persistent_period=config.checkpoint_period)
-        prof.step()
-    prof.stop()
+    #         prof.step()
+    # prof.stop()
 
 
 def _create_optimizer(parameters, optim_name, scheduler_name, initial_lr, total_steps, final_rate=.1):

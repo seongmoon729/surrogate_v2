@@ -99,7 +99,8 @@ def _train_for_object_detection(config):
     # Build optimizer.
     target_params = (
         list(end2end_network.filtering_network.filter.parameters()) +
-        list(end2end_network.filtering_network.pixel_rate_estimator.parameters())
+        list(end2end_network.filtering_network.pixel_rate_estimator.parameters()) +
+        list(end2end_network.filter.parameters())
     )
     optimizer, lr_scheduler = _create_optimizer(
         target_params,

@@ -32,10 +32,6 @@ class Evaluator:
         else:
             surrogate_quality, self.is_saved_session, norm_layer = utils.inspect_session_path(session_path)
 
-        # dummy
-        if surrogate_quality is None:
-            surrogate_quality = 1
-
         # Build end-to-end network.
         cfg = utils.get_od_cfg(vision_task, vision_network)
         self.end2end_network = models.EndToEndNetwork(
@@ -44,7 +40,7 @@ class Evaluator:
         # Restore weights.
         if self.is_saved_session:
             ckpt = checkpoint.Checkpoint(session_path)
-            ckpt.load(self.end2end_network.post_filtering_network, step=session_step)
+            ckpt.load(self.end2end_network.filtering_network, self.end2end_network.post_filtering_network, step=session_step)
 
         # Set evaluation mode & load on GPU.
         self.end2end_network.eval()
@@ -106,14 +102,10 @@ def evaluate_for_object_detection(config):
         eval_downscales = list(map(int, config.eval_downscale.split(',')))
     else:
         eval_downscales = [int(config.eval_downscale)]
-    
-    if config.eval_quality:
-        if ',' in config.eval_quality:
-            eval_qualities = list(map(int, config.eval_quality.split(',')))
-        else:
-            eval_qualities = [int(config.eval_quality)]
+    if ',' in config.eval_quality:
+        eval_qualities = list(map(int, config.eval_quality.split(',')))
     else:
-        eval_qualities = [None]
+        eval_qualities = [int(config.eval_quality)]
     eval_settings = list(itertools.product(eval_downscales, eval_qualities))
 
     # Create or load result dataframe.
@@ -251,6 +243,3 @@ def evaluate_for_object_detection(config):
             result_df.sort_values(
                 by=['task', 'codec', 'downscale', 'step', 'bpp'], inplace=True)
             result_df.to_csv(result_path, index=False)
-
-
-

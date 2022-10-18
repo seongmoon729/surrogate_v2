@@ -112,7 +112,7 @@ def _train_for_object_detection(config):
     output_path = Path('out') / session_path
     last_step = 0
     ckpt = checkpoint.Checkpoint(output_path)
-    last_step = ckpt.resume(end2end_network.filtering_network, optimizer, lr_scheduler)
+    last_step = ckpt.resume(end2end_network.filter, optimizer, lr_scheduler)
     if comm.is_main_process():
         if last_step:
             logger.info(f"Resume training. Last step is {last_step}.")
@@ -167,9 +167,9 @@ def _train_for_object_detection(config):
             if step % 100 == 0:
                 logger.info(f"step: {step:6} | loss_task: {losses['d']:7.4f} | mse: {losses['mse']:7.4f}")
                 if distributed:
-                    target_network = end2end_network.module.filtering_network
+                    target_network = end2end_network.module.filter
                 else:
-                    target_network = end2end_network.filtering_network
+                    target_network = end2end_network.filter
                 ckpt.save(
                     target_network,
                     optimizer,

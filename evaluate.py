@@ -44,7 +44,7 @@ class Evaluator:
         # Restore weights.
         if self.is_saved_session:
             ckpt = checkpoint.Checkpoint(session_path)
-            ckpt.load(self.end2end_network.filtering_network, step=session_step)
+            ckpt.load(self.end2end_network.filter, step=session_step)
 
         # Set evaluation mode & load on GPU.
         self.end2end_network.eval()

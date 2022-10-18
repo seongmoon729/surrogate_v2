@@ -88,7 +88,7 @@ def _train_for_object_detection(config):
 
     # Build end-to-end model.
     end2end_network = models.EndToEndNetwork(
-        config.surrogate_quality, config.vision_task, config.filter_norm_layer, od_cfg=cfg)
+        config.surrogate_quality, config.vision_task, od_cfg=cfg)
 
     # Load on GPU.
     end2end_network.cuda()
@@ -98,8 +98,10 @@ def _train_for_object_detection(config):
 
     # Build optimizer.
     target_params = (
-        list(end2end_network.post_filtering_network.filter.parameters())
-        # + list(end2end_network.post_filtering_network.pixel_rate_estimator.parameters())
+        list(end2end_network.filtering_network.filter.parameters()) +
+        list(end2end_network.filtering_network.pixel_rate_estimator.parameters()) +
+        list(end2end_network.post_filtering_network.filter.parameters()) +
+        list(end2end_network.post_filtering_network.pixel_rate_estimator.parameters())
     )
     optimizer, lr_scheduler = _create_optimizer(
         target_params,
@@ -113,7 +115,7 @@ def _train_for_object_detection(config):
     output_path = Path('out') / session_path
     last_step = 0
     ckpt = checkpoint.Checkpoint(output_path)
-    last_step = ckpt.resume(end2end_network.post_filtering_network, optimizer, lr_scheduler)
+    last_step = ckpt.resume(end2end_network.filtering_network, end2end_network.post_filtering_network, optimizer, lr_scheduler)
     if comm.is_main_process():
         if last_step:
             logger.info(f"Resume training. Last step is {last_step}.")
@@ -144,30 +146,36 @@ def _train_for_object_detection(config):
     end_step = config.steps
     for data, step in zip(dataloader, range(start_step, end_step + 1)):
         losses = end2end_network(data)
-        loss_d = losses['d']
+        # print(losses)
+        loss_rd = losses['r'] + config.lmbda * losses['d']
         
         optimizer.zero_grad()
-        loss_d.backward()
+        loss_rd.backward()
         optimizer.step()
         lr_scheduler.step()
 
         # Calculate reduced losses.
         losses = {k: v.item() for k, v in comm.reduce_dict(losses).items()}
-        loss_d = losses['d']
+        loss_rd = losses['r'] + config.lmbda * losses['d']
 
         # Write on tensorboard.
         if comm.is_main_process():
-            writer.add_scalar('train/loss/distortion', loss_d, step)
+            writer.add_scalar('train/loss/rate', losses['r'], step)
+            writer.add_scalar('train/loss/distortion', losses['d'], step)
+            writer.add_scalar('train/loss/combined', loss_rd, step)
             writer.add_scalar('train/lr', lr_scheduler.get_last_lr()[0], step)
 
             if step % 100 == 0:
-                logger.info(f"step: {step:6} | loss_d: {losses['d']:7.4f}")
+                logger.info(f"step: {step:6} | loss_r: {losses['r']:7.4f} | loss_d: {losses['d']:7.4f}")
                 if distributed:
-                    target_network = end2end_network.module.post_filtering_network
+                    target_network = end2end_network.module.filtering_network
                 else:
-                    target_network = end2end_network.post_filtering_network
+                    target_network1 = end2end_network.filtering_network
+                    target_network2 = end2end_network.post_filtering_network
+
                 ckpt.save(
-                    target_network,
+                    target_network1,
+                    target_network2,
                     optimizer,
                     lr_scheduler,
                     step=step,

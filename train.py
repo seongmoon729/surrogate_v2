@@ -114,6 +114,8 @@ def _train_for_object_detection(config):
     output_path = Path('out') / session_path
     last_step = 0
     ckpt = checkpoint.Checkpoint(output_path)
+
+    # TODO. Restore all weights of pre- and post-filtering network.
     last_step = ckpt.resume(end2end_network.filtering_network, optimizer, lr_scheduler)
     if comm.is_main_process():
         if last_step:
@@ -165,6 +167,8 @@ def _train_for_object_detection(config):
 
             if step % 100 == 0:
                 logger.info(f"step: {step:6} | loss_r: {losses['r']:7.4f} | loss_d: {losses['d']:7.4f}")
+
+                # TODO. Store all weights of pre- and post- filtering network.
                 if distributed:
                     target_network = end2end_network.module.filtering_network
                 else:

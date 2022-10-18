@@ -42,6 +42,7 @@ class Evaluator:
             surrogate_quality, vision_task, norm_layer, od_cfg=cfg)
 
         # Restore weights.
+        # TODO. Restore all weights of pre- and post-filtering network.
         if self.is_saved_session:
             ckpt = checkpoint.Checkpoint(session_path)
             ckpt.load(self.end2end_network.filtering_network, step=session_step)

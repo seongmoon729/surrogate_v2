@@ -37,7 +37,7 @@ class Checkpoint:
                 assert target_ckpt_path.exists()
             
             # Load.
-            target_ckpt = torch.load(target_ckpt_path, map_location=network.device)
+            target_ckpt = torch.load(target_ckpt_path, map_location=next(network.parameters()).device)
             if 'network' in target_ckpt:
                 network.load_state_dict(target_ckpt['network'])
             elif 'model' in target_ckpt:

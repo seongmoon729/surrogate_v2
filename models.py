@@ -61,7 +61,7 @@ class EndToEndNetwork(nn.Module):
             # Convert input format to RGB & batch the images after applying padding.
             images = self.preprocess_image_for_od(inputs)[0]
 
-            original = images
+            original_tensor = images.tensor / 255.
 
             # Pad
             images.tensor, (h, w) = self.filtering_network.preprocess(images.tensor)
@@ -77,7 +77,7 @@ class EndToEndNetwork(nn.Module):
             images.tensor = self.filtering_network.postprocess(codec_out['x_hat'], (h, w))
             
             # Compute mse 
-            loss_mse = F.mse_loss(images.tensor, original.tensor / 255.)
+            loss_mse = F.mse_loss(images.tensor, original_tensor )
 
             # Convert RGB to BGR & denormalize.
             images.tensor = images.tensor[:, [2, 1, 0], :, :] * 255.

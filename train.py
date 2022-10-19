@@ -1,8 +1,8 @@
 import os
 import sys
-import random
 from datetime import timedelta
 
+import numpy as np
 import torch
 import torch.optim as optim
 import torch.distributed as dist
@@ -84,18 +84,13 @@ def _train_for_object_detection(config):
     if comm.is_main_process():
         logger.info(f"Start training script for '{session_path}'.")
 
-    # Parse lambdas.
-    if ',' in config.lmbda:
-        lmbda_list = list(map(float, config.lmbda.split(',')))
-    else:
-        lmbda_list = [float(config.lmbda)]
-
     # Get detectron2 config data.
     cfg = utils.get_od_cfg(config.vision_task, config.vision_network)
 
     # Build end-to-end model.
     end2end_network = models.EndToEndNetwork(
-        config.surrogate_quality, config.vision_task, config.filter_norm_layer, od_cfg=cfg)
+        config.surrogate_quality, config.vision_task, config.filter_norm_layer,
+        od_cfg=cfg, log2_lmbda_min=config.log2_lmbda_min, log2_lmbda_max=config.log2_lmbda_max)
 
     # Load on GPU.
     end2end_network.cuda()
@@ -147,8 +142,9 @@ def _train_for_object_detection(config):
     end_step = config.steps
 
     for data, step in zip(dataloader, range(start_step, end_step + 1)):
-        lmbdas = random.choices(lmbda_list, k=(config.batch_size // comm.get_world_size()))
-        losses = end2end_network(data, lmbdas)
+        sampled_control_params = np.random.rand(config.batch_size // comm.get_world_size())
+        
+        losses = end2end_network(data, sampled_control_params)
         loss_rd = losses['r'] + losses['d']
         
         optimizer.zero_grad()

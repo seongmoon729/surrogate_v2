@@ -18,7 +18,7 @@ def parse_args():
         formatter_class=argparse.RawTextHelpFormatter)
     
     parser.add_argument(
-        "--gpu", "-g", type=str, default="0",
+        "--gpu", "-g", type=str, default="0,1,2,3",
         help="GPU index to use.")
     parser.add_argument(
         "--data_dir", "-d", type=str, default="data",
@@ -44,10 +44,13 @@ def parse_args():
         "--filter_norm_layer", "-fnl", type=str, default='cn',
         help="Normalization layer of filtering network.")
     train_parser.add_argument(
-        "--lmbda", "-ld", type=str, default='1.0',
-        help="RD trade-off coefficient (R + ld * D).")
+        "--log2_lmbda_min", "-lld_min", type=float, default=-4,
+        help="Minimum value of RD trade-off coefficient (R + ld * D).")
     train_parser.add_argument(
-        "--batch_size", "-bs", type=int, default=2,
+        "--log2_lmbda_max", "-lld_max", type=float, default=1,
+        help="Maximum value of RD trade-off coefficient (R + ld * D).")
+    train_parser.add_argument(
+        "--batch_size", "-bs", type=int, default=8,
         help="Batch size.")
     train_parser.add_argument(
         "--optimizer", "-opt", type=str, default="adam",
@@ -56,7 +59,7 @@ def parse_args():
         "--learning_rate", "-lr", type=float, default=1e-4,
         help="Learning rate.")
     train_parser.add_argument(
-        "--lr_scheduler", "-lrs", type=str, default='constant',
+        "--lr_scheduler", "-lrs", type=str, default='exponential',
         help="Learning rate scheduler.")
     train_parser.add_argument(
         "--final_lr_rate", "-flrr", type=float, default=1e-1,

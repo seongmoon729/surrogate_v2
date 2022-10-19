@@ -17,7 +17,16 @@ import codec_ops
 
 
 class EndToEndNetwork(nn.Module):
-    def __init__(self, surrogate_quality, vision_task, normalization='cn', od_cfg=None, input_format='BGR'):
+    def __init__(
+        self,
+        surrogate_quality,
+        vision_task,
+        normalization='cn',
+        od_cfg=None,
+        input_format='BGR',
+        log2_lmbda_min=None,
+        log2_lmbda_max=None,
+    ):
         super().__init__()
         assert input_format in ['RGB', 'BGR']
         self.surrogate_quality = surrogate_quality
@@ -25,6 +34,8 @@ class EndToEndNetwork(nn.Module):
         self.normalization = normalization
         self.od_cfg = od_cfg
         self.input_format = input_format
+        self.log2_lmbda_min = log2_lmbda_min
+        self.log2_lmbda_max = log2_lmbda_max
 
         # Networks.
         self.surrogate_network = ca_zoo.mbt2018(self.surrogate_quality, pretrained=True)
@@ -35,33 +46,43 @@ class EndToEndNetwork(nn.Module):
             [od_cfg.INPUT.MIN_SIZE_TEST, od_cfg.INPUT.MIN_SIZE_TEST], od_cfg.INPUT.MAX_SIZE_TEST
         )
 
-    def forward(self, inputs, lmbdas, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=False):
+    def forward(self, inputs, control_params, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=False):
         """ Forward method. 
             Pre-fixed arguments with 'eval' are only for inference mode (.eval())
         """
+
+        # Make lambdas.
+        log2_lmbda_range = self.log2_lmbda_max - self.log2_lmbda_min
+        log2_lmbdas = control_params * log2_lmbda_range + self.log2_lmbda_min
+        lmbdas = 2 ** log2_lmbdas
+
+        # Make zero-centered values.
+        zero_centered_params = control_params * 2.0 - 1.0
+
         if self.vision_task == 'classification':
             pass
         else:
             if not self.training:
-                return self.inference(inputs, lmbdas, eval_codec, eval_quality, eval_downscale, eval_filtering)
+                return self.inference(inputs, zero_centered_params, eval_codec, eval_quality, eval_downscale, eval_filtering)
 
             # Convert input format to RGB & batch the images after applying padding.
             images = self.preprocess_image_for_od(inputs)
 
             # Normalize & filter.
             images.tensor, (h, w) = self.filtering_network.preprocess(images.tensor)
-            lmbdas = torch.as_tensor(lmbdas, dtype=torch.float32, device=images.tensor.device)
-            images.tensor = self.filtering_network(images.tensor / 255., lmbdas.reshape(len(lmbdas), 1))
+            zero_centered_params = torch.as_tensor(zero_centered_params, dtype=torch.float32, device=images.tensor.device)
+            images.tensor = self.filtering_network(
+                images.tensor / 255.,
+                zero_centered_params.reshape(len(zero_centered_params), 1))
 
             # Apply codec.
             codec_out = self.surrogate_network(images.tensor)
             images.tensor = self.filtering_network.postprocess(codec_out['x_hat'], (h, w))
 
             # Compute averaged bit rate & use it as rate loss.
-            # loss_r = torch.mean(self.compute_bpp(codec_out))
             loss_r = self.compute_bpp(codec_out)
-            loss_r = lmbdas * loss_r
-            loss_r = torch.mean(loss_r)
+            lmbdas = torch.as_tensor(lmbdas, dtype=torch.float32, device=loss_r.device)
+            loss_r = torch.mean(lmbdas * loss_r)
 
             # Convert RGB to BGR & denormalize.
             images.tensor = images.tensor[:, [2, 1, 0], :, :] * 255.
@@ -85,7 +106,7 @@ class EndToEndNetwork(nn.Module):
             losses['d'] = loss_d
             return losses
 
-    def inference(self, original_image, lmbda, codec, quality, downscale, filtering):
+    def inference(self, original_image, zero_centerd_control_param, codec, quality, downscale, filtering):
         """ This method processes only one image (not batched!). """
         assert not self.training
         assert isinstance(original_image, np.ndarray)
@@ -114,8 +135,10 @@ class EndToEndNetwork(nn.Module):
                 # 1. Apply filtering or not.
                 if filtering:
                     padded_image, (h, w) = self.filtering_network.preprocess(original_image)
-                    lmbda = torch.as_tensor(lmbda, dtype=torch.float32, device=padded_image.device).reshape(1, 1)
-                    filtered_image = self.filtering_network(padded_image[None, ...], lmbda)[0]
+                    zero_centerd_control_param = torch.as_tensor(
+                        zero_centerd_control_param, dtype=torch.float32, device=padded_image.device)
+                    filtered_image = self.filtering_network(
+                        padded_image[None, ...], zero_centerd_control_param.reshape(1, 1))[0]
                     filtered_image = self.filtering_network.postprocess(filtered_image, (h, w))
                 else:
                     filtered_image = original_image

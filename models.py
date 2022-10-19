@@ -1,10 +1,11 @@
-from statistics import variance
 import ray
 import numpy as np
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+
+from torchvision.transforms import Resize
 
 from detectron2.data import transforms as T
 from detectron2.structures import ImageList
@@ -51,6 +52,11 @@ class EndToEndNetwork(nn.Module):
             # Convert input format to RGB & batch the images after applying padding.
             images = self.preprocess_image_for_od(inputs)
 
+            # Downscale.
+            original_size = images.tensor.shape[1:3]
+            downscaled_size = list(map(lambda x: x // 2, original_size))
+            images.tensor = Resize(downscaled_size)(images.tensor)
+
             # Normalize & filter.
             images.tensor, (h, w) = self.filtering_network.preprocess(images.tensor)
             images.tensor = self.filtering_network(images.tensor / 255.)
@@ -61,6 +67,9 @@ class EndToEndNetwork(nn.Module):
 
             # Compute averaged bit rate & use it as rate loss.
             loss_r = torch.mean(self.compute_bpp(codec_out))
+
+            # Upscale.
+            images.tensor = Resize(original_size)(images.tensor)
 
             # Convert RGB to BGR & denormalize.
             images.tensor = images.tensor[:, [2, 1, 0], :, :] * 255.

@@ -53,7 +53,7 @@ class EndToEndNetwork(nn.Module):
             images = self.preprocess_image_for_od(inputs)
 
             # Downscale.
-            original_size = images.tensor.shape[1:3]
+            original_size = images.tensor.shape[2:]
             downscaled_size = list(map(lambda x: x // 2, original_size))
             images.tensor = Resize(downscaled_size)(images.tensor)
 

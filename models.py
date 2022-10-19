@@ -158,12 +158,12 @@ class EndToEndNetwork(nn.Module):
                     reconstructed_image = torch.as_tensor(reconstructed_image, device=self.device)
                     # post filtering (w/o encoder, only filter)
                     post_filter_out = self.filter(reconstructed_image[None, ...])[0]
-                    reconstructed_image = reconstructed_image + post_filter_out
-                    reconstructed_image = torch.clip(reconstructed_image, 0., 1.)           
-                    reconstructed_image = reconstructed_image.detach().cpu().numpy()
+                    post_filter_out = reconstructed_image + post_filter_out
+                    post_filter_out = torch.clip(post_filter_out, 0., 1.)           
+                    post_filter_out = post_filter_out.detach().cpu().numpy()
 
                 # Convert reconstructed image format to (H, W, C) & denormalize.
-                od_input_image = reconstructed_image.transpose(1, 2, 0) * 255.
+                od_input_image = post_filter_out.transpose(1, 2, 0) * 255.
 
                 # Convert RGB to BGR.
                 od_input_image = od_input_image[:, :, ::-1]
@@ -191,8 +191,8 @@ class EndToEndNetwork(nn.Module):
         results.update({
             'image': {
                 # Change returned numpy array format to (H, W, C).
-                'filtered': filtered_image.transpose(1, 2, 0),
-                'reconstructed': reconstructed_image.transpose(1, 2, 0),
+                'reconstructed': reconstructed_image.detach().cpu().numpy().transpose(1, 2, 0),
+                'post_filtered': post_filter_out.transpose(1, 2, 0),
             }
         })
         return results

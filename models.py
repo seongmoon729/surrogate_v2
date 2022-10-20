@@ -77,7 +77,7 @@ class EndToEndNetwork(nn.Module):
             images.tensor = self.filtering_network.postprocess(codec_out['x_hat'], (h, w))
             
             # Compute mse 
-            loss_mse = F.mse_loss(images.tensor, original_tensor )
+            loss_mse = F.mse_loss(images.tensor, original_tensor)
 
             # Convert RGB to BGR & denormalize.
             images.tensor = images.tensor[:, [2, 1, 0], :, :] * 255.
@@ -141,18 +141,19 @@ class EndToEndNetwork(nn.Module):
                     filtered_image_ = torch.as_tensor(filtered_image, device=self.device)
                     filtered_image_, (h, w) = self.filtering_network.preprocess(filtered_image_)
                     codec_out = self.surrogate_network(filtered_image_[None, ...])
+                    reconstructed_image = codec_out['x_hat'][0]
 
                     # post filtering (w/o encoder, only filter)
                     post_filter_out = self.filter(codec_out['x_hat'])[0]
-                    reconstructed_image = codec_out['x_hat'][0] + post_filter_out
-                    reconstructed_image = torch.clip(reconstructed_image, 0., 1.)
+                    post_filter_out = codec_out['x_hat'][0] + post_filter_out
+                    post_filter_out = torch.clip(post_filter_out, 0., 1.)
                     
                     # Unpad & cal
-                    reconstructed_image, bpp = (
-                        self.filtering_network.postprocess(reconstructed_image, (h, w)),
+                    post_filter_out, bpp = (
+                        self.filtering_network.postprocess(post_filter_out, (h, w)),
                         self.compute_bpp(codec_out).item())
                     
-                    reconstructed_image = reconstructed_image.detach().cpu().numpy()
+                    post_filter_out = post_filter_out.detach().cpu().numpy()
                 else:
                     # (c). conventional codec.
                     reconstructed_image, bpp = ray.get(codec_ops.ray_codec_fn.remote(

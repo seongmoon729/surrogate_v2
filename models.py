@@ -52,9 +52,10 @@ class EndToEndNetwork(nn.Module):
         """
 
         # Make lambdas.
-        log2_lmbda_range = self.log2_lmbda_max - self.log2_lmbda_min
-        log2_lmbdas = control_params * log2_lmbda_range + self.log2_lmbda_min
-        lmbdas = 2 ** log2_lmbdas
+        if self.log2_lmbda_min and self.log2_lmbda_max:
+            log2_lmbda_range = self.log2_lmbda_max - self.log2_lmbda_min
+            log2_lmbdas = control_params * log2_lmbda_range + self.log2_lmbda_min
+            lmbdas = 2 ** log2_lmbdas
 
         # Make zero-centered values.
         zero_centered_params = control_params * 2.0 - 1.0

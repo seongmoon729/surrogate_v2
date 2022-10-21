@@ -50,11 +50,10 @@ class Evaluator:
         self.end2end_network.eval()
         self.end2end_network.cuda()
     
-    def step(self, input_file, control_param, codec, quality, downscale):
+    def step(self, input_file, codec, quality, downscale):
         image = cv2.imread(str(input_file))
         outputs = self.end2end_network(
             image,
-            control_param,
             eval_codec=codec,
             eval_quality=quality,
             eval_downscale=downscale,
@@ -183,7 +182,7 @@ def evaluate_for_object_detection(config):
                     if evaluators:
                         file = next(input_iter)
                         eval = evaluators.pop()
-                        work_id = eval.step.remote(file, config.control_param, *codec_args)
+                        work_id = eval.step.remote(file, *codec_args)
                         work_info.update({work_id: eval})
                         end_flag = False
                 except StopIteration:
@@ -247,7 +246,6 @@ def evaluate_for_object_detection(config):
                 'bpp'      : mean_bpp,
                 'metric'   : mean_map,
                 'step'     : config.session_step,
-                'control_param' : config.control_param,
             }
             result_df = pd.concat([result_df, pd.DataFrame([result])], ignore_index=True)
             result_df.sort_values(

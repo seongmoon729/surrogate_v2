@@ -95,9 +95,6 @@ def parse_args():
         "--session_step", "-ss", type=int, default=0,
         help="Checkpoint step for saved session (0 is dummy for baseline).")
     eval_parser.add_argument(
-        "--control_param", "-cp", type=float, default=0.5,
-        help="Additional input (0...1) to control the compression rate of filtering network.")
-    eval_parser.add_argument(
         "--eval_codec", "-ec", type=str, default='vvenc',
         help="Choose codec to use in evaluation.")
     eval_parser.add_argument(

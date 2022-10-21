@@ -46,35 +46,28 @@ class EndToEndNetwork(nn.Module):
             [od_cfg.INPUT.MIN_SIZE_TEST, od_cfg.INPUT.MIN_SIZE_TEST], od_cfg.INPUT.MAX_SIZE_TEST
         )
 
-    def forward(self, inputs, control_params, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=False):
+    def forward(self, inputs, control_params=None, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=False):
         """ Forward method. 
             Pre-fixed arguments with 'eval' are only for inference mode (.eval())
         """
 
         # Make lambdas.
-        if self.log2_lmbda_min and self.log2_lmbda_max:
-            log2_lmbda_range = self.log2_lmbda_max - self.log2_lmbda_min
-            log2_lmbdas = control_params * log2_lmbda_range + self.log2_lmbda_min
-            lmbdas = 2 ** log2_lmbdas
-
-        # Make zero-centered values.
-        zero_centered_params = control_params * 2.0 - 1.0
+        log2_lmbda_range = self.log2_lmbda_max - self.log2_lmbda_min
+        log2_lmbdas = control_params * log2_lmbda_range + self.log2_lmbda_min
+        lmbdas = 2 ** log2_lmbdas
 
         if self.vision_task == 'classification':
             pass
         else:
             if not self.training:
-                return self.inference(inputs, zero_centered_params, eval_codec, eval_quality, eval_downscale, eval_filtering)
+                return self.inference(inputs, eval_codec, eval_quality, eval_downscale, eval_filtering)
 
             # Convert input format to RGB & batch the images after applying padding.
             images = self.preprocess_image_for_od(inputs)
 
             # Normalize & filter.
             images.tensor, (h, w) = self.filtering_network.preprocess(images.tensor)
-            zero_centered_params = torch.as_tensor(zero_centered_params, dtype=torch.float32, device=images.tensor.device)
-            images.tensor = self.filtering_network(
-                images.tensor / 255.,
-                zero_centered_params.reshape(len(zero_centered_params), 1))
+            images.tensor = self.filtering_network(images.tensor / 255.)
 
             # Apply codec.
             codec_out = self.surrogate_network(images.tensor)
@@ -107,7 +100,7 @@ class EndToEndNetwork(nn.Module):
             losses['d'] = loss_d
             return losses
 
-    def inference(self, original_image, zero_centerd_control_param, codec, quality, downscale, filtering):
+    def inference(self, original_image, codec, quality, downscale, filtering):
         """ This method processes only one image (not batched!). """
         assert not self.training
         assert isinstance(original_image, np.ndarray)
@@ -136,10 +129,7 @@ class EndToEndNetwork(nn.Module):
                 # 1. Apply filtering or not.
                 if filtering:
                     padded_image, (h, w) = self.filtering_network.preprocess(original_image)
-                    zero_centerd_control_param = torch.as_tensor(
-                        zero_centerd_control_param, dtype=torch.float32, device=padded_image.device)
-                    filtered_image = self.filtering_network(
-                        padded_image[None, ...], zero_centerd_control_param.reshape(1, 1))[0]
+                    filtered_image = self.filtering_network(padded_image[None, ...])[0]
                     filtered_image = self.filtering_network.postprocess(filtered_image, (h, w))
                 else:
                     filtered_image = original_image
@@ -304,20 +294,11 @@ class FilteringNetwork(nn.Module):
         super().__init__()
         self.normalization = normalization
 
-        fc_channel_config = [
-            ( 1, 16), ( 1, 32), ( 1, 64),
-            ( 1, 32), ( 1, 16)
-        ]
-
         conv_channel_config = [
             ( 3, 16), (16, 32), (32, 64),
             (64, 32), (32, 16)
         ]
 
-        self.modulators = nn.ModuleList([
-            FeatureModulator(in_channels, out_channels)
-            for in_channels, out_channels in fc_channel_config
-        ])
         self.filtering_blocks = nn.ModuleList([
             FilteringBlock(in_channels, out_channels, normalization)
             for in_channels, out_channels in conv_channel_config
@@ -327,11 +308,10 @@ class FilteringNetwork(nn.Module):
             nn.Tanh()
         )
 
-    def forward(self, x, ld):
+    def forward(self, x):
         out = x
-        for m, fb in zip(self.modulators, self.filtering_blocks):
-            gamma, beta = m(ld)
-            out = fb(out, gamma=gamma, beta=beta)
+        for fb in self.filtering_blocks:
+            out = fb(out, gamma=None, beta=None)
         out = self.last_conv(out)
         out = out + x
         out = torch.clip(out, 0., 1.)

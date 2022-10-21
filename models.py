@@ -51,16 +51,16 @@ class EndToEndNetwork(nn.Module):
             Pre-fixed arguments with 'eval' are only for inference mode (.eval())
         """
 
-        # Make lambdas.
-        log2_lmbda_range = self.log2_lmbda_max - self.log2_lmbda_min
-        log2_lmbdas = control_params * log2_lmbda_range + self.log2_lmbda_min
-        lmbdas = 2 ** log2_lmbdas
-
         if self.vision_task == 'classification':
             pass
         else:
             if not self.training:
                 return self.inference(inputs, eval_codec, eval_quality, eval_downscale, eval_filtering)
+
+            # Make lambdas.
+            log2_lmbda_range = self.log2_lmbda_max - self.log2_lmbda_min
+            log2_lmbdas = control_params * log2_lmbda_range + self.log2_lmbda_min
+            lmbdas = 2 ** log2_lmbdas
 
             # Convert input format to RGB & batch the images after applying padding.
             images = self.preprocess_image_for_od(inputs)

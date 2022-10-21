@@ -38,7 +38,7 @@ def parse_args():
         "--vision_network", "-vn", type=str, default="faster_rcnn_X_101_32x8d_FPN_3x",
         help="Name of vision task network.")
     train_parser.add_argument(
-        "--surrogate_quality", "-sq", type=int, default=1,
+        "--surrogate_quality", "-sq", type=int, default=6,
         help="Quality of surrogate codec.")
     train_parser.add_argument(
         "--filter_norm_layer", "-fnl", type=str, default='cn',

@@ -157,7 +157,7 @@ def _train_for_object_detection(config):
 
     for data, step in zip(dataloader, range(start_step, end_step + 1)):
         losses = end2end_network(data)
-        loss_rd = config.lmbda * losses['r'] + losses['d']
+        loss_rd = losses['r'] + config.lmbda * losses['d']
         
         optimizer.zero_grad()
         loss_rd.backward()
@@ -166,7 +166,7 @@ def _train_for_object_detection(config):
 
         # Calculate reduced losses.
         losses = {k: v.item() for k, v in comm.reduce_dict(losses).items()}
-        loss_rd = config.lmbda * losses['r'] + losses['d']
+        loss_rd = losses['r'] + config.lmbda * losses['d']
 
         # Write on tensorboard.
         if comm.is_main_process():

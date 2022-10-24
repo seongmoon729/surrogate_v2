@@ -44,10 +44,10 @@ def parse_args():
         "--filter_norm_layer", "-fnl", type=str, default='cn',
         help="Normalization layer of filtering network.")
     train_parser.add_argument(
-        "--log2_lmbda_min", "-lld_min", type=float, default=-4,
+        "--log2_lmbda_min", "-lld_min", type=float, default=-2,
         help="Minimum value of RD trade-off coefficient (R + ld * D).")
     train_parser.add_argument(
-        "--log2_lmbda_max", "-lld_max", type=float, default=1,
+        "--log2_lmbda_max", "-lld_max", type=float, default=2,
         help="Maximum value of RD trade-off coefficient (R + ld * D).")
     train_parser.add_argument(
         "--batch_size", "-bs", type=int, default=8,

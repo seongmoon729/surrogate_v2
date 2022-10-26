@@ -59,7 +59,7 @@ def parse_args():
         "--learning_rate", "-lr", type=float, default=1e-4,
         help="Learning rate.")
     train_parser.add_argument(
-        "--lr_scheduler", "-lrs", type=str, default='exponential',
+        "--lr_scheduler", "-lrs", type=str, default='constant',
         help="Learning rate scheduler.")
     train_parser.add_argument(
         "--final_lr_rate", "-flrr", type=float, default=1e-1,

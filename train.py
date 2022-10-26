@@ -142,9 +142,13 @@ def _train_for_object_detection(config):
     end_step = config.steps
 
     for data, step in zip(dataloader, range(start_step, end_step + 1)):
-        sampled_control_params = np.random.rand(config.batch_size // comm.get_world_size())
+        low, high = -2.0, 2.0
+        low  = high - (high - low) * step / config.steps
+        log2_lmbdas = np.random.uniform(
+            low=low, high=high, size=config.batch_size // comm.get_world_size())
+        lmbdas = 2 ** log2_lmbdas
         
-        losses = end2end_network(data, sampled_control_params)
+        losses = end2end_network(data, lmbdas=lmbdas)
         loss_rd = losses['r'] + losses['d']
         
         optimizer.zero_grad()

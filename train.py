@@ -142,8 +142,10 @@ def _train_for_object_detection(config):
     end_step = config.steps
 
     for data, step in zip(dataloader, range(start_step, end_step + 1)):
-        low, high = -2.0, 2.0
-        low  = high - (high - low) * step / config.steps
+        low, high = config.log2_lmbda_min, config.log2_lmbda_max
+        # low, high = -2.0, 2.0
+        # low = high - (high - low) * step / config.steps
+        # high = low + (high - low) * step / config.steps
         log2_lmbdas = np.random.uniform(
             low=low, high=high, size=config.batch_size // comm.get_world_size())
         lmbdas = 2 ** log2_lmbdas

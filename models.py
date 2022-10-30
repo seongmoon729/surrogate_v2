@@ -73,7 +73,6 @@ class EndToEndNetwork(nn.Module):
             codec_out['x_hat'] = codec_out['x_hat'] + filter_out
             codec_out['x_hat'] = torch.clip(codec_out['x_hat'], 0., 1.)
 
-
             images.tensor = self.filtering_network.postprocess(codec_out['x_hat'], (h, w))
 
             # Compute averaged bit rate & use it as rate loss.

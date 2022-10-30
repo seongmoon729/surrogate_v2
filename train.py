@@ -116,7 +116,7 @@ def _train_for_object_detection(config):
     ckpt = checkpoint.Checkpoint(output_path)
 
     # TODO. Restore all weights of pre- and post-filtering network.
-    last_step = ckpt.resume(end2end_network.filtering_network, optimizer, lr_scheduler)
+    last_step = ckpt.resume(end2end_network.filtering_network, end2end_network.filter, optimizer, lr_scheduler)
     if comm.is_main_process():
         if last_step:
             logger.info(f"Resume training. Last step is {last_step}.")
@@ -170,11 +170,14 @@ def _train_for_object_detection(config):
 
                 # TODO. Store all weights of pre- and post- filtering network.
                 if distributed:
-                    target_network = end2end_network.module.filtering_network
+                    target_network1 = end2end_network.module.filtering_network
+                    target_network2 = end2end_network.module.filter
                 else:
-                    target_network = end2end_network.filtering_network
+                    target_network1 = end2end_network.filtering_network
+                    target_network2 = end2end_network.filter
                 ckpt.save(
-                    target_network,
+                    target_network1,
+                    target_network2,
                     optimizer,
                     lr_scheduler,
                     step=step,

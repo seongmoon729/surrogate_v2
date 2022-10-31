@@ -38,11 +38,9 @@ class Checkpoint:
             
             # Load.
             target_ckpt = torch.load(target_ckpt_path, map_location=network1.device)
-            if 'network' in target_ckpt:
-                network1.load_state_dict(target_ckpt['network1'])
-                network2.load_state_dict(target_ckpt['network2'])   
-            # elif 'model' in target_ckpt:
-            #     network.load_state_dict(target_ckpt['model'])
+            network1.load_state_dict(target_ckpt['network1'])
+            network2.load_state_dict(target_ckpt['network2'])   
+
             if optimizer:
                 optimizer.load_state_dict(target_ckpt['optimizer'])
             if scheduler:

@@ -71,7 +71,8 @@ class EndToEndNetwork(nn.Module):
             # Compute averaged bit rate & use it as rate loss.
             loss_r = self.compute_bpp(codec_out)
             lmbdas = torch.as_tensor(lmbdas, dtype=torch.float32, device=loss_r.device)
-            loss_r = torch.mean(lmbdas * loss_r)
+            wloss_r = torch.mean(lmbdas * loss_r)
+            loss_r  = torch.mean(loss_r)
 
             # Convert RGB to BGR & denormalize.
             images.tensor = images.tensor[:, [2, 1, 0], :, :] * 255.
@@ -91,8 +92,9 @@ class EndToEndNetwork(nn.Module):
             loss_d = sum(losses_d.values())
 
             losses = dict()
-            losses['r'] = loss_r
-            losses['d'] = loss_d
+            losses['wr'] = wloss_r
+            losses['r']  = loss_r
+            losses['d']  = loss_d
             return losses
 
     def inference(self, original_image, codec, quality, downscale, filtering):

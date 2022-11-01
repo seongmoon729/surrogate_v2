@@ -7,11 +7,11 @@ import torch
 import torch.optim as optim
 import torch.distributed as dist
 import torch.multiprocessing as mp
-from torch.profiler import profile, schedule, tensorboard_trace_handler
 from torch.utils.tensorboard import SummaryWriter
 from torch.nn.parallel import DistributedDataParallel
 import detectron2.utils.comm as comm
 from detectron2.data import build_detection_train_loader
+from detectron2.utils.env import seed_all_rng
 
 import utils
 import models
@@ -77,11 +77,15 @@ def _dist_train_worker(
 
 
 def _train_for_object_detection(config):
-    logger = utils.get_logger()
-
     # Set session path (path for artifacts of training).
     session_path = 'out' / utils.build_session_path(config)
+
+    # Seed random number generator.
+    seed_all_rng(config.seed + comm.get_rank())
+    torch.manual_seed(config.seed)
+
     if comm.is_main_process():
+        logger = utils.get_logger()
         logger.info(f"Start training script for '{session_path}'.")
 
     # Get detectron2 config data.
@@ -137,21 +141,19 @@ def _train_for_object_detection(config):
     dataloader = build_detection_train_loader(cfg)
 
     # Run training loop.
-    logger.info("Start training.")
     start_step = last_step + 1
     end_step = config.steps
 
     for data, step in zip(dataloader, range(start_step, end_step + 1)):
-        low, high = config.log2_lmbda_min, config.log2_lmbda_max
-        # low, high = -2.0, 2.0
-        # low = high - (high - low) * step / config.steps
-        # high = low + (high - low) * step / config.steps
         log2_lmbdas = np.random.uniform(
-            low=low, high=high, size=config.batch_size // comm.get_world_size())
+            low=config.log2_lmbda_min,
+            high=config.log2_lmbda_max,
+            size=(config.batch_size // comm.get_world_size()))
+        
         lmbdas = 2 ** log2_lmbdas
         
         losses = end2end_network(data, lmbdas=lmbdas)
-        loss_rd = losses['r'] + losses['d']
+        loss_rd = losses['wr'] + losses['d']
         
         optimizer.zero_grad()
         loss_rd.backward()
@@ -160,7 +162,7 @@ def _train_for_object_detection(config):
 
         # Calculate reduced losses.
         losses = {k: v.item() for k, v in comm.reduce_dict(losses).items()}
-        loss_rd = losses['r'] + losses['d']
+        loss_rd = losses['wr'] + losses['d']
 
         # Write on tensorboard.
         if comm.is_main_process():

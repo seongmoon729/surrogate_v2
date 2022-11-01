@@ -73,6 +73,9 @@ def parse_args():
     train_parser.add_argument(
         "--suffix", "-sf", type=str, default="",
         help="Suffix to the session path.")
+    train_parser.add_argument(
+        "--seed", "-sd", type=int, default=0,
+        help="Random seed.")
 
     eval_parser = subparsers.add_parser(
         "evaluate",

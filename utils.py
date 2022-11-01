@@ -31,7 +31,7 @@ def build_session_path(config):
 
     second_session_name = (
         f"s{config.steps}_bs{config.batch_size}_{config.optimizer}"
-        f"_lr{config.learning_rate}_{config.lr_scheduler}")
+        f"_lr{config.learning_rate}_{config.lr_scheduler}_sd{config.seed}")
     if config.lr_scheduler == 'exponential':
         second_session_name += f"_{config.final_lr_rate}"
 

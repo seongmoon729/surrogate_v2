@@ -5,6 +5,8 @@ from pathlib import Path
 import ray
 import cv2
 import pandas as pd
+import numpy as np
+from PIL import Image
 from tqdm import tqdm
 
 from object_detection.utils import object_detection_evaluation
@@ -81,6 +83,8 @@ class Evaluator:
             class_name = self.coco_classes[coco_cnt_id]
             od_output = [imageId, class_name, scores[i]] + bboxes[i].tolist()
             if self.vision_task == 'segmentation':
+                assert all(map(lambda a, b: a == b, masks[i].shape[:2], [H, W])), \
+                    f"Size of resulting mask does not match the input size: {imageId}"
                 od_output += [
                     masks[i].shape[1],
                     masks[i].shape[0],
@@ -132,23 +136,22 @@ def evaluate_for_object_detection(config):
         result_df = pd.DataFrame(
             columns=['task', 'codec', 'downscale', 'quality', 'bpp', 'metric', 'step'])
 
-    input_files = utils.get_input_files(config.input_list, config.input_dir)
+    # Set path of input files.
+    input_base_dir     = Path(config.input_dir)
+    input_img_dir      = input_base_dir / 'validation'
+    annot_dir          = input_base_dir / 'annotations_5k'
+    coco_class_file    = annot_dir / 'coco_classes.txt'
+    coco_labelmap_file = annot_dir / 'coco_label_map.pbtxt'
+    input_list_file    = annot_dir / f"{config.vision_task}_validation_input_5k.lst"
+    input_annot_boxes  = annot_dir / f"{config.vision_task}_validation_bbox_5k.csv"
+    input_annot_labels = annot_dir / f"{config.vision_task}_validation_labels_5k.csv"
+
+    if config.vision_task == 'segmentation':
+        gt_segm_mask_dir  = annot_dir / 'challenge_2019_validation_masks'
+        input_annot_masks = annot_dir / f"{config.vision_task}_validation_masks_5k.csv"
+
+    input_files = utils.get_input_files(input_list_file, input_img_dir)
     logger.info(f"Number of total images: {len(input_files)}")
-
-    # Read coco classes file.
-    coco_classes = open(config.coco_classes, 'r').read().splitlines()
-
-    # Read input label map.
-    class_label_map, categories = utils.read_label_map(config.input_label_map)
-    selected_classes = list(class_label_map.keys())
-
-    # Read annotation files.
-    all_location_annotations = pd.read_csv(config.input_annotations_boxes)
-    all_label_annotations = pd.read_csv(config.input_annotations_labels)
-    all_label_annotations.rename(columns={'Confidence': 'ConfidenceImageLabel'}, inplace=True)
-    is_instance_segmentation_eval = False
-    # TODO. Segmentation.
-    all_annotations = pd.concat([all_location_annotations, all_label_annotations])
 
     # Create evaluators.
     n_gpu = len(config.gpu.split(',')) if ',' in config.gpu else 1
@@ -160,6 +163,23 @@ def evaluate_for_object_detection(config):
     total = len(input_files) * len(eval_settings)
     with tqdm(total=total, dynamic_ncols=True, smoothing=0.1) as pbar:
         for downscale, quality in eval_settings:
+            
+            # Read coco classes file.
+            coco_classes = open(coco_class_file, 'r').read().splitlines()
+
+            # Read input label map.
+            class_label_map, categories = utils.read_label_map(coco_labelmap_file)
+            selected_classes = list(class_label_map.keys())
+
+            # Read annotation files.
+            all_location_annotations = pd.read_csv(input_annot_boxes)
+            all_label_annotations = pd.read_csv(input_annot_labels)
+            all_label_annotations.rename(columns={'Confidence': 'ConfidenceImageLabel'}, inplace=True)
+            is_instance_segmentation_eval = False
+            if config.vision_task == 'segmentation':
+                anno_gt = pd.read_csv(input_annot_masks)
+                is_instance_segmentation_eval = True
+
             eval_init_args = (
                 config.vision_task,
                 config.vision_network,
@@ -218,26 +238,53 @@ def evaluate_for_object_detection(config):
             od_output_df['LabelName'] = od_output_df['LabelName'].replace(' ', '_', regex=True)
             od_output_df = od_output_df[od_output_df['LabelName'].isin(selected_classes)]
 
+            # Resize GT segmentation labels.
+            if config.vision_task == 'segmentation':
+                all_segm_annotations = pd.read_csv(input_annot_masks)
+                for idx, row in anno_gt.iterrows():
+                    pred_rslt = od_output_df.loc[od_output_df['ImageID'] == row['ImageID']]
+                    if not len(pred_rslt):
+                        logger.info(f"Image not in prediction: {row['ImageID']}")
+                        continue
+                    
+                    W, H = pred_rslt['ImageWidth'].iloc[0], pred_rslt['ImageHeight'].iloc[0]
+
+                    mask_img = Image.open(gt_segm_mask_dir / row['MaskPath'])
+
+                    if any(map(lambda a, b: a != b, mask_img.size, [W, H])):
+                        mask_img = mask_img.resize((W, H))
+                        mask = np.asarray(mask_img)
+                        mask_str = oid_mask_encoding.encode_binary_mask(mask).decode('ascii')
+                        all_segm_annotations.at[idx, 'Mask'] = mask_str
+                        all_segm_annotations.at[idx, 'ImageWidth'] = W
+                        all_segm_annotations.at[idx, 'ImageHeight'] = H
+
+                all_location_annotations = oid_utils.merge_boxes_and_masks(
+                    all_location_annotations, all_segm_annotations)
+            
+            all_annotations = pd.concat([all_location_annotations, all_label_annotations])
+
             # Open images challenge evaluation.
-            if config.vision_task == 'detection':
-                # Generate open image challenge evaluator.
-                challenge_evaluator = (
-                    object_detection_evaluation.OpenImagesChallengeEvaluator(
-                        categories, evaluate_masks=is_instance_segmentation_eval))
-                # Ready for evaluation.
-                for image_id, image_groundtruth in all_annotations.groupby('ImageID'):
+            # Generate open image challenge evaluator.
+            challenge_evaluator = (
+                object_detection_evaluation.OpenImagesChallengeEvaluator(
+                    categories, evaluate_masks=is_instance_segmentation_eval))
+            # Ready for evaluation.
+
+            # for image_id, image_groundtruth in all_annotations.groupby('ImageID'):
+            with tqdm(all_annotations.groupby('ImageID')) as tbar:
+                for image_id, image_groundtruth in tbar:
                     groundtruth_dictionary = oid_utils.build_groundtruth_dictionary(image_groundtruth, class_label_map)
                     challenge_evaluator.add_single_ground_truth_image_info(image_id, groundtruth_dictionary)
                     prediction_dictionary = oid_utils.build_predictions_dictionary(
                         od_output_df.loc[od_output_df['ImageID'] == image_id], class_label_map)
                     challenge_evaluator.add_single_detected_image_info(image_id, prediction_dictionary)
 
-                # Evaluate. class-wise evaluation result is produced.
-                metrics = challenge_evaluator.evaluate()
-                mean_map = list(metrics.values())[0]
-                mean_bpp = sum(bpps) / len(bpps)
-            else:
-                pass
+            # Evaluate. class-wise evaluation result is produced.
+            metrics = challenge_evaluator.evaluate()
+            mean_map = list(metrics.values())[0]
+            mean_bpp = sum(bpps) / len(bpps)
+                
             result = {
                 'task'     : config.vision_task,
                 'codec'    : config.eval_codec,

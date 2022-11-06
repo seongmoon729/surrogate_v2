@@ -120,10 +120,6 @@ def parse_args():
         "--eval_downscale", "-ed", type=str, default='0',
         help="Image downscale level before the encoding (comma separated).\n"
             f"   * levels: {','.join(map(str, DS_LEVELS))}")
-    # eval_parser.add_argument(
-    #     "--segmentation_mask_dir", "-smd", type=str,
-    #     default='data/open-images-v6-etri/annotations_5k/challenge_2019_validation_masks',
-    #     help="Directory to groundtruth segmentation files.")
     eval_parser.add_argument(
         "--input_dir", "-id", type=str,
         default='data/open-images-v6-etri/',

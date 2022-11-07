@@ -46,7 +46,7 @@ class EndToEndNetwork(nn.Module):
             [od_cfg.INPUT.MIN_SIZE_TEST, od_cfg.INPUT.MIN_SIZE_TEST], od_cfg.INPUT.MAX_SIZE_TEST
         )
 
-    def forward(self, inputs, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=False, lmbdas=None):
+    def forward(self, inputs, filter_quality, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=False):
         """ Forward method. 
             Pre-fixed arguments with 'eval' are only for inference mode (.eval())
         """
@@ -55,7 +55,19 @@ class EndToEndNetwork(nn.Module):
             pass
         else:
             if not self.training:
-                return self.inference(inputs, eval_codec, eval_quality, eval_downscale, eval_filtering)
+                return self.inference(inputs, filter_quality, eval_codec, eval_quality, eval_downscale, eval_filtering)
+
+            def random_lambda(x):
+                assert (x > 0 and x < 4)
+                lows  = [0, -2, -4]
+                highs = [2,  0, -2]
+                low, high = lows[x - 1], highs[x - 1]
+                log2_lmbda = np.random.uniform(low=low, high=high)
+                lmbda = 2 ** log2_lmbda
+                return lmbda
+
+            vrandom_lambda = np.vectorize(random_lambda)
+            lmbdas = vrandom_lambda(filter_quality)
 
             # Convert input format to RGB & batch the images after applying padding.
             images = self.preprocess_image_for_od(inputs)
@@ -97,7 +109,7 @@ class EndToEndNetwork(nn.Module):
             losses['d']  = loss_d
             return losses
 
-    def inference(self, original_image, codec, quality, downscale, filtering):
+    def inference(self, original_image, filter_quality, codec, quality, downscale, filtering):
         """ This method processes only one image (not batched!). """
         assert not self.training
         assert isinstance(original_image, np.ndarray)

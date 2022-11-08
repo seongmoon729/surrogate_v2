@@ -74,7 +74,9 @@ class EndToEndNetwork(nn.Module):
 
             # Normalize & filter.
             images.tensor, (h, w) = self.filtering_network.preprocess(images.tensor)
-            images.tensor = self.filtering_network(images.tensor / 255.)
+            filter_quality = torch.as_tensor(filter_quality , dtype=torch.float32, device=images.tensor.device)
+            filter_quality = filter_quality[:, None]
+            images.tensor = self.filtering_network(images.tensor / 255., filter_quality)
 
             # Apply codec.
             codec_out = self.surrogate_network(images.tensor)
@@ -138,7 +140,9 @@ class EndToEndNetwork(nn.Module):
                 # 1. Apply filtering or not.
                 if filtering:
                     padded_image, (h, w) = self.filtering_network.preprocess(original_image)
-                    filtered_image = self.filtering_network(padded_image[None, ...])[0]
+                    filter_quality = torch.as_tensor(filter_quality , dtype=torch.float32, device=padded_image.device)
+                    filtered_image = self.filtering_network(
+                        padded_image[None, ...], filter_quality[None, None, ...])[0]
                     filtered_image = self.filtering_network.postprocess(filtered_image, (h, w))
                 else:
                     filtered_image = original_image
@@ -298,16 +302,53 @@ class VisionNetwork(nn.Module):
         self.model.backbone.train(False)
 
 
+# class FilteringNetwork(nn.Module):
+#     def __init__(self, normalization='cn'):
+#         super().__init__()
+#         self.normalization = normalization
+
+#         conv_channel_config = [
+#             ( 3, 16), (16, 32), (32, 64),
+#             (64, 32), (32, 16)
+#         ]
+
+#         self.filtering_blocks = nn.ModuleList([
+#             FilteringBlock(in_channels, out_channels, normalization)
+#             for in_channels, out_channels in conv_channel_config
+#         ])
+#         self.last_conv = nn.Sequential(
+#             nn.Conv2d(16, 3, kernel_size=1, stride=1),
+#             nn.Tanh()
+#         )
+
+#     def forward(self, x):
+#         out = x
+#         for fb in self.filtering_blocks:
+#             out = fb(out, gamma=None, beta=None)
+#         out = self.last_conv(out)
+#         out = out + x
+#         out = torch.clip(out, 0., 1.)
+#         return out
+
 class FilteringNetwork(nn.Module):
     def __init__(self, normalization='cn'):
         super().__init__()
         self.normalization = normalization
+
+        fc_channel_config = [
+            ( 1, 16), ( 1, 32), ( 1, 64),
+            ( 1, 32), ( 1, 16)
+        ]
 
         conv_channel_config = [
             ( 3, 16), (16, 32), (32, 64),
             (64, 32), (32, 16)
         ]
 
+        self.modulators = nn.ModuleList([
+            FeatureModulator(in_channels, out_channels)
+            for in_channels, out_channels in fc_channel_config
+        ])
         self.filtering_blocks = nn.ModuleList([
             FilteringBlock(in_channels, out_channels, normalization)
             for in_channels, out_channels in conv_channel_config
@@ -317,10 +358,11 @@ class FilteringNetwork(nn.Module):
             nn.Tanh()
         )
 
-    def forward(self, x):
+    def forward(self, x, q):
         out = x
-        for fb in self.filtering_blocks:
-            out = fb(out, gamma=None, beta=None)
+        for m, fb in zip(self.modulators, self.filtering_blocks):
+            gamma, beta = m(q)
+            out = fb(out, gamma=gamma, beta=beta)
         out = self.last_conv(out)
         out = out + x
         out = torch.clip(out, 0., 1.)

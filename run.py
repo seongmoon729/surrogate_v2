@@ -127,6 +127,9 @@ def parse_args():
     eval_parser.add_argument(
         "--num_parallel_eval_per_gpu", "-npepg", type=int, default=6,
         help="Number of parallel evaluators per gpu.")
+    eval_parser.add_argument(
+        "--filter_quality", "-fq", type=int, default='1',
+        help="Quality of filtering network (1, 2, 3).")
 
     args = parser.parse_args()
     if args.command is None:

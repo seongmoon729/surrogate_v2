@@ -23,7 +23,8 @@ def build_session_path(config):
     session_path = Path(config.vision_task)
     session_path /= config.vision_network
 
-    first_session_name = f"q{config.surrogate_quality}_log2ld{config.log2_lmbda_min},{config.log2_lmbda_max}"
+    # first_session_name = f"q{config.surrogate_quality}_log2ld{config.log2_lmbda_min},{config.log2_lmbda_max}"
+    first_session_name = f"q{config.surrogate_quality}_log2ld{-4},{2}_p3"
     if config.filter_norm_layer == 'bn':
         first_session_name += '_bn'
     if config.suffix:

@@ -12,6 +12,9 @@ from codec_ops import (
     VVENC_QUALITIES,
 )
 
+_DETECTION_NETWORKS = ["faster_rcnn_X_101_32x8d_FPN_3x"]
+_SEGMENTATION_NETWORKS = ["mask_rcnn_X_101_32x8d_FPN_3x"]
+
 
 def parse_args():
     parser = argparse.ArgumentParser(
@@ -77,10 +80,12 @@ def parse_args():
         description="")
     eval_parser.add_argument(
         "--vision_task", "-vt", type=str, default="detection",
-        help="Vision task ('classification', 'detection', 'segmentation').")
+        help="Vision task ('detection', 'segmentation').")
     eval_parser.add_argument(
         "--vision_network", "-vn", type=str, default="faster_rcnn_X_101_32x8d_FPN_3x",
-        help="Name of vision task network.")
+        help="Name of vision task network.\n"
+            f"  detection: {_DETECTION_NETWORKS}\n"
+            f"  segmentation: {_SEGMENTATION_NETWORKS}\n")
     eval_parser.add_argument(
         "--session_path", "-sp", type=str,
         default='out/detection/faster_rcnn_X_101_32x8d_FPN_3x/base',
@@ -109,32 +114,8 @@ def parse_args():
         help="Image downscale level before the encoding (comma separated).\n"
             f"   * levels: {','.join(map(str, DS_LEVELS))}")
     eval_parser.add_argument(
-        "--coco_classes", "-cc", type=str,
-        default='data/open-images-v6-etri/annotations_5k/coco_classes.txt',
-        help="Text file for coco classes.")
-    eval_parser.add_argument(
-        "--input_label_map", "-ilm", type=str,
-        default='data/open-images-v6-etri/annotations_5k/coco_label_map.pbtxt',
-        help="Open images challenge labelmap.")
-    eval_parser.add_argument(
-        "--input_annotations_boxes", "-iab", type=str,
-        default='data/open-images-v6-etri/annotations_5k/detection_validation_bbox_5k.csv',
-        help="File with groundtruth boxes annotations.")
-    eval_parser.add_argument(
-        "--input_annotations_labels", "-ial", type=str,
-        default='data/open-images-v6-etri/annotations_5k/detection_validation_labels_5k.csv',
-        help="File with groundtruth labels annotations.")
-    eval_parser.add_argument(
-        "--segmentation_mask_dir", "-smd", type=str,
-        default='data/open-images-v6-etri/annotations_5k/challenge_2019_validation_masks',
-        help="Directory to groundtruth segmentation files.")
-    eval_parser.add_argument(
-        "--input_list", "-il", type=str,
-        default='data/open-images-v6-etri/annotations_5k/detection_validation_input_5k.lst',
-        help="Text file for input list.")
-    eval_parser.add_argument(
         "--input_dir", "-id", type=str,
-        default='data/open-images-v6-etri/validation/',
+        default='data/open-images-v6-etri/',
         help="Directory path for inputs.")
     eval_parser.add_argument(
         "--num_parallel_eval_per_gpu", "-npepg", type=int, default=6,

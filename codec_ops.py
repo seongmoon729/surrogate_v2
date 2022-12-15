@@ -27,7 +27,7 @@ VVENC_QUALITIES = [50, 45, 40, 35, 30, 25]
 @ray.remote
 def ray_codec_fn(x, codec, quality, downscale=0):
     return codec_fn(x, codec, quality, downscale)
-    
+    3
 
 def codec_fn(x, codec, quality, downscale=0):
     """ Encode & decode input with codec. 

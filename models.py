@@ -11,7 +11,8 @@ from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.utils.events import EventStorage
 from detectron2.modeling.meta_arch.rcnn import GeneralizedRCNN
 
-import compressai.zoo as ca_zoo
+# import compressai.zoo as ca_zoo
+# import compressai
 
 import codec_ops
 
@@ -38,7 +39,8 @@ class EndToEndNetwork(nn.Module):
         self.log2_lmbda_max = log2_lmbda_max
 
         # Networks.
-        self.surrogate_network = ca_zoo.mbt2018(self.surrogate_quality, pretrained=True)
+        self.standard_codec = StandardCodec()
+        self.bitrate_estimator = BitrateEstimator()
         self.filtering_network = FilteringNetwork(self.normalization)
         self.vision_network = VisionNetwork(self.vision_task, self.od_cfg)
 
@@ -52,7 +54,7 @@ class EndToEndNetwork(nn.Module):
         """
 
         # Make lambdas.
-        if self.log2_lmbda_min and self.log2_lmbda_max:
+        if (self.log2_lmbda_min is not None) and (self.log2_lmbda_max is not None):
             log2_lmbda_range = self.log2_lmbda_max - self.log2_lmbda_min
             log2_lmbdas = control_params * log2_lmbda_range + self.log2_lmbda_min
             lmbdas = 2 ** log2_lmbdas
@@ -75,13 +77,21 @@ class EndToEndNetwork(nn.Module):
             images.tensor = self.filtering_network(
                 images.tensor / 255.,
                 zero_centered_params.reshape(len(zero_centered_params), 1))
+            images.tensor = self.filtering_network.postprocess(images.tensor, (h, w))
 
             # Apply codec.
-            codec_out = self.surrogate_network(images.tensor)
-            images.tensor = self.filtering_network.postprocess(codec_out['x_hat'], (h, w))
+            x_hat, bpp = self.standard_codec(images.tensor)
+            # x_hat = self.standard_codec(images.tensor)
+
+            # Estimate bitrate.
+            bpp_pred = self.bitrate_estimator(x_hat)
+
+            # Compute auxiliary loss
+            loss_aux = torch.mean((bpp - bpp_pred) ** 2)
+            # loss_aux = torch.mean(x_hat ** 2)
 
             # Compute averaged bit rate & use it as rate loss.
-            loss_r = self.compute_bpp(codec_out)
+            loss_r = bpp_pred
             lmbdas = torch.as_tensor(lmbdas, dtype=torch.float32, device=loss_r.device)
             loss_r = torch.mean(lmbdas * loss_r)
 
@@ -105,6 +115,7 @@ class EndToEndNetwork(nn.Module):
             losses = dict()
             losses['r'] = loss_r
             losses['d'] = loss_d
+            losses['aux'] = loss_aux
             return losses
 
     def inference(self, original_image, zero_centerd_control_param, codec, quality, downscale, filtering):
@@ -330,8 +341,9 @@ class FilteringNetwork(nn.Module):
     def forward(self, x, ld):
         out = x
         for m, fb in zip(self.modulators, self.filtering_blocks):
-            gamma, beta = m(ld)
-            out = fb(out, gamma=gamma, beta=beta)
+            # gamma, beta = m(ld)
+            # out = fb(out, gamma=gamma, beta=beta)
+            out = fb(out, gamma=None, beta=None)
         out = self.last_conv(out)
         out = out + x
         out = torch.clip(out, 0., 1.)
@@ -482,6 +494,59 @@ class FMConv2dBlock(nn.Module):
         if (gamma is not None) and (beta is not None):
             x = x * gamma[:, :, None, None] + beta[:, :, None, None]
         return x
+
+
+class BitrateEstimator(nn.Module):
+    """ Bitrate estimator module that predicts bit-per-pixel from the reconstructed image. """
+    def __init__(self):
+        super().__init__()
+        self.conv_color = nn.Conv2d(3, 3, (1, 1), 1)
+        self.convs = nn.Sequential(
+            nn.Conv2d( 1,  32, (3, 3), 2),
+            nn.ReLU(True),
+            nn.Conv2d(32,  64, (3, 3), 2),
+            nn.ReLU(True),
+            nn.Conv2d(64, 128, (3, 3), 2),
+            nn.ReLU(True),
+            nn.Conv2d(128, 256, (3, 3), 2),
+            nn.Sigmoid(),
+            nn.AdaptiveAvgPool2d(1),
+        )
+    
+    def forward(self, x):
+        x = self.conv_color(x)
+        x0, x1, x2 = x[:, 0:1, :, :], x[:, 1:2, :, :], x[:, 2:, :, :]
+        x0, x1, x2 = (self.convs(x) for x in (x0, x1, x2))
+        x0, x1, x2 = (torch.sum(x, dim=(1, 2, 3)) for x in (x0, x1, x2))
+        return x0 + x1 + x2
+
+
+class StandardCodec(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.connect_gradient = GradientConnector.apply
+    
+    def forward(self, x):
+        device = x.device
+        x_ = x.detach().cpu().numpy()
+        n = x_.shape[0]
+        x_hat, bpp = zip(*ray.get([codec_ops.ray_codec_fn.remote(x_[i], 'webp', 53) for i in range(n)]))
+        x_hat = np.stack(x_hat, axis=0)
+        bpp = np.stack(bpp, axis=0)
+        x_hat = torch.as_tensor(x_hat, dtype=torch.float32, device=device)
+        bpp = torch.as_tensor(bpp, dtype=torch.float32, device=device)
+        _, x_hat = self.connect_gradient(x, x_hat)
+        return x_hat, bpp
+
+
+class GradientConnector(torch.autograd.Function):
+    @staticmethod
+    def forward(_, input1, input2):
+        return input1, input2
+    
+    @staticmethod
+    def backward(_, grad_out1, grad_out2):
+        return grad_out1, grad_out1
 
 
 def build_object_detection_model(cfg):

@@ -108,6 +108,14 @@ def _train_for_object_detection(config):
         config.steps,
         config.final_lr_rate)
 
+    estimator_params = end2end_network.bitrate_estimator.parameters()
+    aux_optimizer, _ = _create_optimizer(
+        estimator_params,
+        config.optimizer,
+        'constant',
+        1e-4,
+        config.steps)
+
     # Search checkpoint files & resume.
     last_step = 0
     ckpt = checkpoint.Checkpoint(session_path)
@@ -144,12 +152,19 @@ def _train_for_object_detection(config):
     for data, step in zip(dataloader, range(start_step, end_step + 1)):
         sampled_control_params = np.random.rand(config.batch_size // comm.get_world_size())
         
+        optimizer.zero_grad()
+        aux_optimizer.zero_grad()
+
         losses = end2end_network(data, sampled_control_params)
         loss_rd = losses['r'] + losses['d']
-        
-        optimizer.zero_grad()
         loss_rd.backward()
         optimizer.step()
+
+        losses = end2end_network(data, sampled_control_params)
+        loss_aux = losses['aux']
+        loss_aux.backward()
+        aux_optimizer.step()
+
         lr_scheduler.step()
 
         # Calculate reduced losses.
@@ -161,6 +176,7 @@ def _train_for_object_detection(config):
             writer.add_scalar('train/loss/rate', losses['r'], step)
             writer.add_scalar('train/loss/distortion', losses['d'], step)
             writer.add_scalar('train/loss/combined', loss_rd, step)
+            writer.add_scalar('train/loss/auxiliary', losses['aux'], step)
             writer.add_scalar('train/lr', lr_scheduler.get_last_lr()[0], step)
 
             if step % 100 == 0:

@@ -22,6 +22,7 @@ def get_logger():
 def build_session_path(config):
     session_path = Path(config.vision_task)
     session_path /= config.vision_network
+    session_path /= str(config.train_downscale)
 
     first_session_name = f"q{config.surrogate_quality}_ld{config.lmbda}"
     if config.filter_norm_layer == 'bn':

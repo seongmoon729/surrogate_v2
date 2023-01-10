@@ -21,7 +21,7 @@ import codec_ops
 
 
 class EndToEndNetwork(nn.Module):
-    def __init__(self, surrogate_quality, vision_task, norm_layer='cn', od_cfg=None, input_format='BGR'):
+    def __init__(self, surrogate_quality, vision_task, norm_layer='cn', od_cfg=None, input_format='BGR', downscale_n=1):
         super().__init__()
         assert input_format in ['RGB', 'BGR']
         self.surrogate_quality = surrogate_quality
@@ -29,6 +29,7 @@ class EndToEndNetwork(nn.Module):
         self.norm_layer = norm_layer
         self.od_cfg = od_cfg
         self.input_format = input_format
+        self.downscale_n = downscale_n
 
         # Networks.
         self.surrogate_network = ca_zoo.mbt2018(self.surrogate_quality, pretrained=True)
@@ -52,24 +53,35 @@ class EndToEndNetwork(nn.Module):
             # Convert input format to RGB & batch the images after applying padding.
             images = self.preprocess_image_for_od(inputs)
 
+            # print('\n original shape: , images.tensor.shape)
+
             # Downscale.
             original_size = images.tensor.shape[2:]
-            downscaled_size = list(map(lambda x: x // 2, original_size))
+            num_pixels = original_size[-2] * original_size[-1]
+            downscaled_size = list(map(lambda x: x // self.downscale_n, original_size))
             images.tensor = Resize(downscaled_size)(images.tensor)
+
+            # print('downscaled size: ', images.tensor.shape)
 
             # Normalize & filter.
             images.tensor, (h, w) = self.filtering_network.preprocess(images.tensor)
             images.tensor = self.filtering_network(images.tensor / 255.)
 
+            # print('preprocessed: ', images.tensor.shape)
+
             # Apply codec.
             codec_out = self.surrogate_network(images.tensor)
             images.tensor = self.filtering_network.postprocess(codec_out['x_hat'], (h, w))
 
+            # print('codec_out: ', codec_out['x_hat'].shape)
+
             # Compute averaged bit rate & use it as rate loss.
-            loss_r = torch.mean(self.compute_bpp(codec_out))
+            loss_r = torch.mean(self.compute_bpp(codec_out, num_pixels=num_pixels))
 
             # Upscale.
             images.tensor = Resize(original_size)(images.tensor)
+            # No Upscale, just padding
+            # images.tensor, _ = self.filtering_network.preprocess(images.tensor)
 
             # Convert RGB to BGR & denormalize.
             images.tensor = images.tensor[:, [2, 1, 0], :, :] * 255.
@@ -114,6 +126,8 @@ class EndToEndNetwork(nn.Module):
                 # Convert (H, W, C) format to (C, H, W),
                 # which is canonical input format of torch models.
                 original_image = original_image.transpose(2, 0, 1)
+                original_size = original_image.shape
+                num_pixels = original_size[-2] * original_size[-1]
 
                 # Convert to torch tensor.
                 original_image = torch.as_tensor(original_image, device=self.device)
@@ -141,7 +155,7 @@ class EndToEndNetwork(nn.Module):
                     # Unpad & cal
                     reconstructed_image, bpp = (
                         self.filtering_network.postprocess(codec_out['x_hat'][0], (h, w)),
-                        self.compute_bpp(codec_out).item())
+                        self.compute_bpp(codec_out, num_pixels=num_pixels).item())
                     reconstructed_image = reconstructed_image.detach().cpu().numpy()
                 else:
                     # (c). conventional codec.
@@ -149,7 +163,8 @@ class EndToEndNetwork(nn.Module):
                         filtered_image,
                         codec=codec,
                         quality=quality,
-                        downscale=downscale))
+                        downscale=downscale,
+                        num_pixels=num_pixels))
 
                 # Convert reconstructed image format to (H, W, C) & denormalize.
                 od_input_image = reconstructed_image.transpose(1, 2, 0) * 255.
@@ -198,9 +213,11 @@ class EndToEndNetwork(nn.Module):
         images = ImageList.from_tensors(images, self.vision_network.size_divisibility)
         return images
 
-    def compute_bpp(self, out):
-        size = out['x_hat'].size()
-        num_pixels = size[-2] * size[-1]
+    def compute_bpp(self, out, num_pixels):
+        # size = out['x_hat'].size()
+        # print('size: ', size)
+        # num_pixels = size[-2] * size[-1]
+        
         return sum(-torch.log2(likelihoods).sum(axis=(1, 2, 3)) / num_pixels
                 for likelihoods in out['likelihoods'].values())
 

@@ -68,6 +68,10 @@ def parse_args():
         "--checkpoint_period", "-cp", type=int, default=10000,
         help="Checkpoint period.")
     train_parser.add_argument(
+        "--train_downscale", "-td", type=int, default=1,
+        help="Image downscale level before the encoding (comma separated).\n"
+            f"   * levels: {','.join(map(str, DS_LEVELS))}")
+    train_parser.add_argument(
         "--suffix", "-sf", type=str, default="",
         help="Suffix to the session path.")
 

@@ -88,7 +88,7 @@ def _train_for_object_detection(config):
 
     # Build end-to-end model.
     end2end_network = models.EndToEndNetwork(
-        config.surrogate_quality, config.vision_task, config.filter_norm_layer, od_cfg=cfg)
+        config.surrogate_quality, config.vision_task, config.filter_norm_layer, od_cfg=cfg, downscale_n=config.train_downscale)
 
     # Load on GPU.
     end2end_network.cuda()
@@ -110,7 +110,7 @@ def _train_for_object_detection(config):
         config.final_lr_rate)
 
     # Search checkpoint files & resume.
-    output_path = Path('out') / session_path
+    output_path = Path('out_modified-bpp') / session_path
     last_step = 0
     ckpt = checkpoint.Checkpoint(output_path)
     last_step = ckpt.resume(end2end_network.filtering_network, optimizer, lr_scheduler)

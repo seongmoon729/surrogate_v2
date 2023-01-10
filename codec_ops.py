@@ -25,11 +25,11 @@ VVENC_QUALITIES = [50, 45, 40, 35, 30, 25]
 
 
 @ray.remote
-def ray_codec_fn(x, codec, quality, downscale=0):
-    return codec_fn(x, codec, quality, downscale)
+def ray_codec_fn(x, codec, quality, downscale=0, num_pixels=1):
+    return codec_fn(x, codec, quality, downscale, num_pixels)
     
 
-def codec_fn(x, codec, quality, downscale=0):
+def codec_fn(x, codec, quality, downscale=0, num_pixels=1):
     """ Encode & decode input with codec. 
         Args:
             x: 'np.ndarray' with range of [0, 1] and order of (C, H, W).
@@ -45,7 +45,7 @@ def codec_fn(x, codec, quality, downscale=0):
     x = x.round().astype('uint8')
     pil_img = Image.fromarray(x)
     
-    pil_img_recon, bpp = run_codec(pil_img, codec, quality, downscale)
+    pil_img_recon, bpp = run_codec(pil_img, codec, quality, downscale, num_pixels)
     pil_img.close()
 
     x = np.array(pil_img_recon)
@@ -57,7 +57,7 @@ def codec_fn(x, codec, quality, downscale=0):
     return x, bpp
 
 
-def run_codec(input, codec, q, ds=0):
+def run_codec(input, codec, q, ds=0, num_pixels=1):
     assert ds in DS_LEVELS, f"Choose one of {DS_LEVELS}."
 
     # Make temp directory for processing.
@@ -113,7 +113,8 @@ def run_codec(input, codec, q, ds=0):
     # Generate processing results.
     recon_img = Image.open(recon_png_path)
     bytes = bin_path.stat().st_size
-    bpp = bytes * 8 / (h * w)
+    # bpp = bytes * 8 / (h * w)
+    bpp = bytes * 8 / num_pixels
     return recon_img, bpp
 
 

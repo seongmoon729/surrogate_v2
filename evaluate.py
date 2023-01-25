@@ -39,7 +39,7 @@ class Evaluator:
         # Build end-to-end network.
         cfg = utils.get_od_cfg(vision_task, vision_network)
         self.end2end_network = models.EndToEndNetwork(
-            surrogate_quality, vision_task, norm_layer, od_cfg=cfg)
+            surrogate_quality, vision_task, norm_layer, od_cfg=cfg, downscale_n_eval=1)
 
         # Restore weights.
         if self.is_saved_session:
@@ -50,14 +50,15 @@ class Evaluator:
         self.end2end_network.eval()
         self.end2end_network.cuda()
     
-    def step(self, input_file, codec, quality, downscale):
+    def step(self, input_file, codec, quality, downscale, eval_downscale_torch):
         image = cv2.imread(str(input_file))
         outputs = self.end2end_network(
             image,
             eval_codec=codec,
             eval_quality=quality,
             eval_downscale=downscale,
-            eval_filtering=self.is_saved_session)
+            eval_filtering=self.is_saved_session,
+            downscale_n_eval=eval_downscale_torch)
         imageId = input_file.stem
         classes = outputs['instances'].pred_classes.to('cpu').numpy()
         scores = outputs['instances'].scores.to('cpu').numpy()
@@ -99,7 +100,7 @@ def evaluate_for_object_detection(config):
 
     session_path = Path(config.session_path)
     session_path.mkdir(parents=True, exist_ok=True)
-    result_path = session_path / 'result.csv'
+    result_path = session_path / 'result_simple.csv'
 
     # Generate evaluation settings.
     if ',' in config.eval_downscale:
@@ -124,16 +125,21 @@ def evaluate_for_object_detection(config):
         subset_df = subset_df[subset_df.step == config.session_step]
         subset_df = subset_df[subset_df.task == config.vision_task]
         subset_df = subset_df[subset_df.codec == config.eval_codec]
+        subset_df = subset_df[subset_df.eval_downscale_torch == config.eval_downscale_torch]
         evaluated_settings = itertools.product(subset_df.downscale, subset_df.quality)
         for _setting in evaluated_settings:
             if _setting in eval_settings:
                 eval_settings.remove(_setting)
     else:
         result_df = pd.DataFrame(
-            columns=['task', 'codec', 'downscale', 'quality', 'bpp', 'metric', 'step'])
+            columns=['task', 'codec', 'downscale', 'quality', 'bpp', 'metric', 'step', 'eval_downscale_torch', 'image_id'])
 
     input_files = utils.get_input_files(config.input_list, config.input_dir)
     logger.info(f"Number of total images: {len(input_files)}")
+
+    input_file_ids = []
+    for f in input_files:
+        input_file_ids.append(str(f.stem))
 
     # Read coco classes file.
     coco_classes = open(config.coco_classes, 'r').read().splitlines()
@@ -172,7 +178,7 @@ def evaluate_for_object_detection(config):
             # Make/set evaluators and their inputs.
             evaluators = [eval_builder.remote(*eval_init_args) for _ in range(n_eval)]
             input_iter = iter(input_files)
-            codec_args = (config.eval_codec, quality, downscale)
+            codec_args = (config.eval_codec, quality, downscale, config.eval_downscale_torch)
             # Run evaluators.
             od_outputs, bpps = [], []
             work_info = dict()
@@ -226,31 +232,55 @@ def evaluate_for_object_detection(config):
                         categories, evaluate_masks=is_instance_segmentation_eval))
                 # Ready for evaluation.
                 for image_id, image_groundtruth in all_annotations.groupby('ImageID'):
-                    groundtruth_dictionary = oid_utils.build_groundtruth_dictionary(image_groundtruth, class_label_map)
-                    challenge_evaluator.add_single_ground_truth_image_info(image_id, groundtruth_dictionary)
-                    prediction_dictionary = oid_utils.build_predictions_dictionary(
-                        od_output_df.loc[od_output_df['ImageID'] == image_id], class_label_map)
-                    challenge_evaluator.add_single_detected_image_info(image_id, prediction_dictionary)
+                    if image_id in input_file_ids:
+                        groundtruth_dictionary = oid_utils.build_groundtruth_dictionary(image_groundtruth, class_label_map)
+                        challenge_evaluator.add_single_ground_truth_image_info(image_id, groundtruth_dictionary)
+                        prediction_dictionary = oid_utils.build_predictions_dictionary(
+                            od_output_df.loc[od_output_df['ImageID'] == image_id], class_label_map)
+                        challenge_evaluator.add_single_detected_image_info(image_id, prediction_dictionary)
 
-                # Evaluate. class-wise evaluation result is produced.
-                metrics = challenge_evaluator.evaluate()
-                mean_map = list(metrics.values())[0]
-                mean_bpp = sum(bpps) / len(bpps)
+                        # Evaluate. class-wise evaluation result is produced.
+                        metrics = challenge_evaluator.evaluate()
+                        mean_map = list(metrics.values())[0]
+                        mean_bpp = sum(bpps) / len(bpps)
+
+                        result = {
+                            'task'     : config.vision_task,
+                            'codec'    : config.eval_codec,
+                            'downscale': downscale,
+                            'quality'  : quality,
+                            'bpp'      : mean_bpp,
+                            'metric'   : mean_map,
+                            'step'     : config.session_step,
+                            'eval_downscale_torch'  : config.eval_downscale_torch,
+                            'image_id' : image_id, 
+                        }
+                        result_df = pd.concat([result_df, pd.DataFrame([result])], ignore_index=True)
+                        result_df.sort_values(
+                            by=['image_id', 'task', 'codec', 'eval_downscale_torch', 'downscale', 'step', 'bpp', ], inplace=True)
+                        result_df.to_csv(result_path, index=False)
+
+
+
+                # # Evaluate. class-wise evaluation result is produced.
+                # metrics = challenge_evaluator.evaluate()
+                # mean_map = list(metrics.values())[0]
+                # mean_bpp = sum(bpps) / len(bpps)
             else:
                 pass
-            result = {
-                'task'     : config.vision_task,
-                'codec'    : config.eval_codec,
-                'downscale': downscale,
-                'quality'  : quality,
-                'bpp'      : mean_bpp,
-                'metric'   : mean_map,
-                'step'     : config.session_step,
-            }
-            result_df = pd.concat([result_df, pd.DataFrame([result])], ignore_index=True)
-            result_df.sort_values(
-                by=['task', 'codec', 'downscale', 'step', 'bpp'], inplace=True)
-            result_df.to_csv(result_path, index=False)
-
-
+            # result = {
+            #     'task'     : config.vision_task,
+            #     'codec'    : config.eval_codec,
+            #     'downscale': downscale,
+            #     'quality'  : quality,
+            #     'bpp'      : mean_bpp,
+            #     'metric'   : mean_map,
+            #     'step'     : config.session_step,
+            #     'eval_downscale_torch'  : config.eval_downscale_torch,
+            #     'image_id' : image_id, 
+            # }
+            # result_df = pd.concat([result_df, pd.DataFrame([result])], ignore_index=True)
+            # result_df.sort_values(
+            #     by=['image_id', 'task', 'codec', 'eval_downscale_torch', 'downscale', 'step', 'bpp', ], inplace=True)
+            # result_df.to_csv(result_path, index=False)
 

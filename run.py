@@ -68,6 +68,9 @@ def parse_args():
         "--checkpoint_period", "-cp", type=int, default=10000,
         help="Checkpoint period.")
     train_parser.add_argument(
+        "--train_downscale", "-td", type=int, default=1,
+        help="Image downscale parameter (h//td, w//td)")
+    train_parser.add_argument(
         "--suffix", "-sf", type=str, default="",
         help="Suffix to the session path.")
 
@@ -106,8 +109,11 @@ def parse_args():
         help="Allow user can evaluate the model with various qualities.")
     eval_parser.add_argument(
         "--eval_downscale", "-ed", type=str, default='0',
-        help="Image downscale level before the encoding (comma separated).\n"
+        help="Image downscale level using ffmepg before the encoding (comma separated).\n"
             f"   * levels: {','.join(map(str, DS_LEVELS))}")
+    eval_parser.add_argument(
+        "--eval_downscale_torch", "-edt", type=int, default=1,
+        help="Image downscaling scale using torchvision.transforms.Resize() before the encoding (comma separated).")
     eval_parser.add_argument(
         "--coco_classes", "-cc", type=str,
         default='data/open-images-v6-etri/annotations_5k/coco_classes.txt',

@@ -1,5 +1,8 @@
 import ray
 import numpy as np
+from pathlib import Path
+from PIL import Image
+from matplotlib import cm
 
 import torch
 import torch.nn as nn
@@ -21,7 +24,7 @@ import codec_ops
 
 
 class EndToEndNetwork(nn.Module):
-    def __init__(self, surrogate_quality, vision_task, norm_layer='cn', od_cfg=None, input_format='BGR'):
+    def __init__(self, surrogate_quality, vision_task, norm_layer='cn', od_cfg=None, input_format='BGR', downscale_n=1, downscale_n_eval=1):
         super().__init__()
         assert input_format in ['RGB', 'BGR']
         self.surrogate_quality = surrogate_quality
@@ -29,6 +32,8 @@ class EndToEndNetwork(nn.Module):
         self.norm_layer = norm_layer
         self.od_cfg = od_cfg
         self.input_format = input_format
+        self.downscale_n = downscale_n
+        self.downscale_n_eval = downscale_n_eval
 
         # Networks.
         self.surrogate_network = ca_zoo.mbt2018(self.surrogate_quality, pretrained=True)
@@ -39,7 +44,7 @@ class EndToEndNetwork(nn.Module):
             [od_cfg.INPUT.MIN_SIZE_TEST, od_cfg.INPUT.MIN_SIZE_TEST], od_cfg.INPUT.MAX_SIZE_TEST
         )
 
-    def forward(self, inputs, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=False):
+    def forward(self, inputs, eval_codec=None, eval_quality=None, eval_downscale=None, eval_filtering=False, downscale_n_eval=1):
         """ Forward method. 
             Pre-fixed arguments with 'eval' are only for inference mode (.eval())
         """
@@ -47,26 +52,27 @@ class EndToEndNetwork(nn.Module):
             pass
         else:
             if not self.training:
-                return self.inference(inputs, eval_codec, eval_quality, eval_downscale, eval_filtering)
+                return self.inference(inputs, eval_codec, eval_quality, eval_downscale, eval_filtering, downscale_n_eval)
 
             # Convert input format to RGB & batch the images after applying padding.
             images = self.preprocess_image_for_od(inputs)
 
             # Downscale.
             original_size = images.tensor.shape[2:]
-            downscaled_size = list(map(lambda x: x // 2, original_size))
+            num_pixels = original_size[-2] * original_size[-1]
+            downscaled_size = list(map(lambda x: x // self.downscale_n, original_size))
             images.tensor = Resize(downscaled_size)(images.tensor)
 
-            # Normalize & filter.
+            # Normalize
             images.tensor, (h, w) = self.filtering_network.preprocess(images.tensor)
-            images.tensor = self.filtering_network(images.tensor / 255.)
+            images.tensor = images.tensor / 255.
 
             # Apply codec.
             codec_out = self.surrogate_network(images.tensor)
             images.tensor = self.filtering_network.postprocess(codec_out['x_hat'], (h, w))
 
             # Compute averaged bit rate & use it as rate loss.
-            loss_r = torch.mean(self.compute_bpp(codec_out))
+            loss_r = torch.mean(self.compute_bpp(codec_out, num_pixels=num_pixels))
 
             # Upscale.
             images.tensor = Resize(original_size)(images.tensor)
@@ -92,7 +98,7 @@ class EndToEndNetwork(nn.Module):
             losses['d'] = loss_d
             return losses
 
-    def inference(self, original_image, codec, quality, downscale, filtering):
+    def inference(self, original_image, codec, quality, downscale, filtering, downscale_n_eval):
         """ This method processes only one image (not batched!). """
         assert not self.training
         assert isinstance(original_image, np.ndarray)
@@ -114,17 +120,26 @@ class EndToEndNetwork(nn.Module):
                 # Convert (H, W, C) format to (C, H, W),
                 # which is canonical input format of torch models.
                 original_image = original_image.transpose(2, 0, 1)
+                original_size = original_image.shape
+                num_pixels = original_size[-2] * original_size[-1]
 
                 # Convert to torch tensor.
                 original_image = torch.as_tensor(original_image, device=self.device)
 
+                # Downscale.
+                original_size = original_image.shape[1:]
+                downscaled_size = list(map(lambda x: x // downscale_n_eval, original_size))
+                original_image = Resize(downscaled_size)(original_image)
+
                 # 1. Apply filtering or not.
-                if filtering:
-                    padded_image, (h, w) = self.filtering_network.preprocess(original_image)
-                    filtered_image = self.filtering_network(padded_image[None, ...])[0]
-                    filtered_image = self.filtering_network.postprocess(filtered_image, (h, w))
-                else:
-                    filtered_image = original_image
+                # if filtering:
+                #     padded_image, (h, w) = self.filtering_network.preprocess(original_image)
+                #     filtered_image = self.filtering_network(padded_image[None, ...])[0]
+                #     filtered_image = self.filtering_network.postprocess(filtered_image, (h, w))
+                # else:
+                #     filtered_image = original_image
+
+                filtered_image = original_image
 
                 # Convert torch tensor to numpy array.
                 filtered_image = filtered_image.detach().cpu().numpy()
@@ -141,7 +156,7 @@ class EndToEndNetwork(nn.Module):
                     # Unpad & cal
                     reconstructed_image, bpp = (
                         self.filtering_network.postprocess(codec_out['x_hat'][0], (h, w)),
-                        self.compute_bpp(codec_out).item())
+                        self.compute_bpp(codec_out, num_pixels=num_pixels).item())
                     reconstructed_image = reconstructed_image.detach().cpu().numpy()
                 else:
                     # (c). conventional codec.
@@ -149,10 +164,32 @@ class EndToEndNetwork(nn.Module):
                         filtered_image,
                         codec=codec,
                         quality=quality,
-                        downscale=downscale))
+                        downscale=downscale,
+                        num_pixels=num_pixels))
 
+                
+                # Upscale.
+                reconstructed_image = torch.as_tensor(reconstructed_image)
+                reconstructed_image = Resize(original_size)(reconstructed_image)
+
+                reconstructed_image = reconstructed_image.detach().cpu().numpy()
+                
                 # Convert reconstructed image format to (H, W, C) & denormalize.
                 od_input_image = reconstructed_image.transpose(1, 2, 0) * 255.
+
+
+                # Save image
+                img_num = 1
+                img_path = 'quality' + str(quality) + '_' + 'edt' + str(downscale_n_eval) + '_' + str(img_num) + '.png'
+                recon_img_path = Path('recon_img/simple') / img_path
+                while recon_img_path.exists():
+                    img_num += 1
+                    img_path = 'quality' + str(quality) + '_' + 'edt' + str(downscale_n_eval) + '_' + str(img_num) + '.png'
+                    recon_img_path = Path('recon_img/simple') / img_path
+                save_img = Image.fromarray(np.uint8(od_input_image))
+                # print(recon_img_path, 'saved.')
+                save_img.save(recon_img_path)
+
 
                 # Convert RGB to BGR.
                 od_input_image = od_input_image[:, :, ::-1]
@@ -198,9 +235,10 @@ class EndToEndNetwork(nn.Module):
         images = ImageList.from_tensors(images, self.vision_network.size_divisibility)
         return images
 
-    def compute_bpp(self, out):
-        size = out['x_hat'].size()
-        num_pixels = size[-2] * size[-1]
+    def compute_bpp(self, out, num_pixels):
+        # size = out['x_hat'].size()
+        # num_pixels = size[-2] * size[-1]
+        
         return sum(-torch.log2(likelihoods).sum(axis=(1, 2, 3)) / num_pixels
                 for likelihoods in out['likelihoods'].values())
 

@@ -88,7 +88,7 @@ def _train_for_object_detection(config):
 
     # Build end-to-end model.
     end2end_network = models.EndToEndNetwork(
-        config.surrogate_quality, config.vision_task, config.filter_norm_layer, od_cfg=cfg)
+        config.surrogate_quality, config.vision_task, config.filter_norm_layer, od_cfg=cfg, downscale_n=config.train_downscale)
 
     # Load on GPU.
     end2end_network.cuda()
@@ -98,7 +98,8 @@ def _train_for_object_detection(config):
 
     # Build optimizer.
     target_params = (
-        list(end2end_network.filtering_network.filter.parameters()) +
+        # list(end2end_network.filtering_network.filter.parameters()) +
+        
         list(end2end_network.filtering_network.pixel_rate_estimator.parameters())
     )
     optimizer, lr_scheduler = _create_optimizer(
